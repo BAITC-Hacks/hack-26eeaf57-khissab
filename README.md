@@ -2,6 +2,8 @@
 
 HackAlem AI, Halyk Bank track, Case 1: Career Quest.
 
+Hackathon team repository for Khissab: `hack-26eeaf57-khissab`.
+
 Career Quest is an offline-first employee development navigator. It recommends 1-3 next development activities from local JSON/CSV starter-kit data, explains the decision with multi-factor rationale, and shows HR where development is lagging.
 
 ## Status
