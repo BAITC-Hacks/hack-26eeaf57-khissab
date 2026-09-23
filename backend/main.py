@@ -70,8 +70,19 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
 
     @app.get("/employees/{employee_id}")
     def employee(employee_id: str) -> dict:
-        engine = employee_engine(employee_id)
-        return {"profile": engine.employees[employee_id], "trajectory": engine.trajectory(employee_id)}
+        dataset = app.state.store.read()
+        engine = RecommendationEngine(dataset)
+        if employee_id not in engine.employees:
+            raise HTTPException(404, "Employee not found")
+        history = [{
+            **row, "title": engine.events[row["event_id"]]["title"],
+            "type": engine.events[row["event_id"]]["type"],
+        } for row in dataset.activity_history if row["employee_id"] == employee_id]
+        return {
+            "profile": engine.employees[employee_id], "trajectory": engine.trajectory(employee_id),
+            "as_of_date": engine.as_of.isoformat(),
+            "activity_history": sorted(history, key=lambda row: (row["date"], row["record_id"]), reverse=True),
+        }
 
     @app.get("/recommend/{employee_id}")
     async def recommend(employee_id: str, limit: int = Query(3, ge=1, le=3), debug: bool = False) -> dict:

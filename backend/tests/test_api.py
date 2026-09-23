@@ -126,6 +126,32 @@ def test_recommendation_slim_default_debug_full_and_trap(api):
         assert client.get(f"/recommend/TEST_EMPLOYEE?limit={limit}").status_code == 422
 
 
+def test_employee_history_has_event_details_all_statuses_and_no_other_employees(api):
+    client, app, _ = api
+    statuses = ("completed", "in_progress", "dropped", "no_show", "declined", "overdue")
+    event_ids = ("CRITICAL", "SQL", "PAST_WORKSHOP_0", "PAST_WORKSHOP_1", "PAST_WORKSHOP_2", "MANDATORY")
+    history = [record(
+        f"HISTORY_{index}", event_id, status, "manager", employee_id="WITH_HISTORY",
+        date="2026-09-21" if index % 2 else "2026-09-20",
+        completion_pct=100 if status == "completed" else 50 if status in ("in_progress", "dropped", "overdue") else 0,
+    ) for index, (status, event_id) in enumerate(zip(statuses, event_ids))]
+    response = client.post("/upload", json={
+        "employees": [new_profile("WITH_HISTORY"), new_profile("EMPTY_HISTORY")], "activity_history": history,
+    })
+    assert response.status_code == 201, response.text
+    detail = client.get("/employees/WITH_HISTORY").json()
+    assert detail["as_of_date"] == "2026-10-01"
+    events = {row["event_id"]: row for row in app.state.store.read().events}
+    expected = [{**row, "title": events[row["event_id"]]["title"], "type": events[row["event_id"]]["type"]}
+                for row in sorted(history, key=lambda row: (row["date"], row["record_id"]), reverse=True)]
+    assert detail["activity_history"] == expected
+    assert {row["status"] for row in detail["activity_history"]} == set(statuses)
+    assert client.get("/employees/EMPTY_HISTORY").json()["activity_history"] == []
+    original = client.get("/employees/TEST_EMPLOYEE").json()["activity_history"]
+    assert {row["record_id"] for row in original} == {"SKIP_0", "SKIP_1", "SKIP_2"}
+    assert all(row["employee_id"] == "TEST_EMPLOYEE" for row in original)
+
+
 def test_upload_json_then_immediate_recommendation_and_restart(api):
     client, app, settings = api
     profile = new_profile()
@@ -247,6 +273,10 @@ def test_complete_updates_trajectory_is_idempotent_and_survives_restart(api):
         detail = restarted.get("/employees/TEST_EMPLOYEE").json()
         assert detail["profile"]["skills"] == updated["skills"]
         assert detail["profile"]["grade"] == "Middle"
+        history = detail["activity_history"]
+        assert len(history) == 4
+        assert history[0] == {**completions[0], "title": "CRITICAL", "type": "course"}
+        assert history[0]["record_id"] == updated["record_id"]
         assert "CRITICAL" not in {r["event_id"] for r in restarted.get("/recommend/TEST_EMPLOYEE").json()["recommendations"]}
 
 
@@ -268,6 +298,8 @@ def test_repeatable_completion_and_concurrent_retry(api):
     assert complete(client, event_id="EV_036", request_id="second-session").json()["skills"][SPEAKING] == 2
     records = [r for r in app.state.store.read().activity_history if r["event_id"] == "EV_036"]
     assert len(records) == 2
+    history = client.get("/employees/TEST_EMPLOYEE").json()["activity_history"]
+    assert {r["record_id"] for r in history if r["event_id"] == "EV_036"} == {r["record_id"] for r in records}
 
 
 @pytest.mark.parametrize("event_id,reason", [

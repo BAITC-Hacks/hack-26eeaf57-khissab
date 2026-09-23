@@ -41,6 +41,21 @@ Docker is the primary run path. Before starting a fresh clone, place the separat
 
 `DATABASE_URL=sqlite:////app/storage/career_quest.sqlite3` points to `/app/storage` in the container, bind-mounted from the repo's gitignored `/storage/` directory. First startup creates the directory/file and seeds it transactionally. Subsequent starts validate the source dataset but preserve the existing database, including progress and any later uploads. No prebuilt database or secret is required or committed.
 
+From a clean clone, with Docker Desktop running (replace the dataset path with the supplied starter kit):
+
+```bash
+git clone https://github.com/BAITC-Hacks/hack-26eeaf57-khissab.git
+cd hack-26eeaf57-khissab
+mkdir -p data
+cp -R /path/to/career_quest_dataset/. data/
+cp .env.example .env
+docker compose up --build -d
+curl --fail http://localhost:8000/health
+docker compose logs --tail=50 backend frontend
+```
+
+Wait for backend startup before the health check. A clean clone needs the P5.1 commit on the remote to include employee history. Building images initially requires network access or cached base images/packages; once prepared, `docker compose up --no-build` runs offline. Stop with `docker compose down`; the bind-mounted SQLite file remains.
+
 ## Local run without Docker
 
 This is the fallback for verification when Docker is unavailable. Use Python 3.12 (matching the backend image) and Node.js 20+ with npm. Run from the repository root, with the starter kit already in `data/`.
@@ -118,7 +133,7 @@ P1 covers dataset ingestion and validation as the foundation for the TZ's profil
 | Endpoint | Response / behavior |
 |---|---|
 | `GET /employees` | Array of `{id, name, role, grade, department}` for profile selection. |
-| `GET /employees/{id}` | `{profile, trajectory}`; trajectory includes target role/grade, each required skill's current/required/gap/critical flag, total/critical gaps, and progress percentage. |
+| `GET /employees/{id}` | `{profile, trajectory, as_of_date, activity_history}`; trajectory includes target role/grade, each required skill's current/required/gap/critical flag, total/critical gaps, and progress percentage. History contains only this employee's records, newest date/record ID first, with event `title` and `type` plus the dataset fields (`record_id`, `event_id`, `date`, `status`, etc.). All six statuses are included; no history returns `[]`. |
 | `GET /recommend/{id}?limit=3` | `{employee_id, as_of_date, recommendations}`; 0-3 positive eligible steps, each with event details, score, slim `factors`, `rationale`, explanation provenance, and `gateway_to`. Empty means no eligible useful step, not an error. |
 | `GET /recommend/{id}?debug=true` | Also includes `debug_factors` with the full engine factors and all engagement types. Default responses and LLM prompts remain slim. |
 | `POST /complete` | JSON `{employee_id, event_id, request_id}`; returns updated `skills`, `skill_changes`, `trajectory`, and persisted record/request IDs. |
@@ -135,9 +150,9 @@ This is a local hackathon demo API, not an authentication boundary. HR receives 
 
 The React app has two separated views:
 
-- Employee view: profile selector, role/grade/department, target trajectory, current skill levels versus target-grade requirements, recommendation cards, and a completion panel for activities marked complete in the current UI session.
+- Employee view: profile selector, role/grade/department, target trajectory, current skill levels versus target-grade requirements, recommendation cards, and Completed / Past activities loaded from SQLite. History shows event title, type, date, and status, including completed, in progress, dropped, no show, declined, and overdue activities.
 - Recommendation cards: each card shows the score, event metadata, every skill gap used for scoring (`current -> required`, gap, effective gain, critical flag), engagement counts/factors, rationale text, explanation source, and `gateway_to` unlock evidence.
-- Mark complete: posts `POST /complete`, updates the visible skill levels and trajectory from the response, then re-fetches recommendations and HR aggregates without a browser reload.
+- Mark complete: posts `POST /complete`, updates the visible skill levels and trajectory from the response, merges the new completion into history by `record_id`, then re-fetches recommendations and HR aggregates without a browser reload. Reopening or reloading the employee retains persisted history without duplicating session completions; separate recurring event sessions remain separate records.
 - HR overview: reads only `GET /hr/overview` aggregates: lagging skills, count of employees with no recommended step, and participation by activity. It does not render employee engagement histories.
 - Upload panel: supports multipart `employees_file` + `history_file` and JSON upload batches. After a successful upload, the app refreshes employees, opens the first inserted employee, and shows recommendations immediately.
 
@@ -235,7 +250,34 @@ The optional adapter uses a local server implementing OpenAI-compatible Chat Com
 python -m backend.explain E0002 --data-dir ./data --env-file .env --limit 1
 ```
 
-Existing shell variables take precedence over `.env`. In particular, unset an exported empty `LLM_API_KEY` before using `--env-file`. Compose continues to use `.env.example` and the no-key template by default. The local CLI above is the P3 verification path for optional model configuration.
+Existing shell variables take precedence over `.env`. In particular, unset an exported empty `LLM_API_KEY` before using `--env-file`. Compose continues to use `.env.example` and the no-key template by default. Editing `.env` alone does not change the container's environment; use the explicit override below for the live-model check.
+
+With a tool-capable model server already running on the host, edit these entries in `.env` (replace the model ID and port with those of your server):
+
+```dotenv
+LLM_MODEL=your-loaded-model-id
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_API_KEY=local
+LLM_TIMEOUT_SECONDS=8
+```
+
+Use the server's token instead of `local` if it requires authentication. Then recreate the backend with `.env` appended after the default env file:
+
+```bash
+docker compose -f docker-compose.yml -f - up -d --force-recreate backend <<'YAML'
+services:
+  backend:
+    env_file:
+      - .env
+YAML
+curl --fail -sS 'http://localhost:8000/recommend/E0002?limit=1'
+```
+
+Wait for backend startup before the request. Verify `recommendations[0].explanation.source` is `llm` and `fallback_reason` is null. A successful HTTP response alone is not proof of live LLM use: the API deliberately returns templates when the model fails. Repeat the same Compose override when recreating the backend with your model settings.
+
+`explain.py` sends `POST ${LLM_BASE_URL}/chat/completions` with `Authorization: Bearer ${LLM_API_KEY}`. Set the base URL to the API prefix, usually `/v1`, not the full `/chat/completions` path. It expects OpenAI-compatible **Chat Completions function calling**, including a forced `submit_explanation` tool call and `strict: true` schema. The response must contain exactly one `choices[0].message.tool_calls` entry with JSON-string `function.arguments` shaped as `{"clauses":[{"fact_id":"grade","phrasing":"direct"}, ...]}` covering every supplied fact once; free text or incompatible tool output triggers fallback. This is not the Responses API or a server's native `/api/chat` endpoint.
+
+For a local Python backend, use `LLM_BASE_URL=http://127.0.0.1:<port>/v1` in `.env` and start it from the repo root with `DATA_DIR=./data DATABASE_URL=sqlite:///./storage/career_quest.sqlite3 .venv/bin/python -m uvicorn backend.main:app --env-file .env --host 127.0.0.1 --port 8000`. Unset any exported `LLM_*` variables that would override the file.
 
 From Docker Desktop, use `http://host.docker.internal:<port>/v1` for a model running on the host. The adapter accepts loopback and `host.docker.internal` endpoints only, ignores proxy environment variables, and does not follow redirects. Remote endpoints fall back to the template under the repo's offline rule. The model service itself must also operate locally without forwarding to a cloud provider.
 

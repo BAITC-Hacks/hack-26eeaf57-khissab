@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
@@ -122,6 +122,7 @@ function App() {
   const [completingEvent, setCompletingEvent] = useState("");
   const [error, setError] = useState("");
   const [uploadResult, setUploadResult] = useState(null);
+  const employeeRequest = useRef(0);
 
   async function loadEmployees(preferredId) {
     const rows = await apiRequest("/employees");
@@ -145,6 +146,7 @@ function App() {
 
   async function loadEmployee(employeeId) {
     if (!employeeId) return;
+    const request = ++employeeRequest.current;
     setLoadingEmployee(true);
     setError("");
     try {
@@ -152,14 +154,16 @@ function App() {
         apiRequest(`/employees/${encodeURIComponent(employeeId)}`),
         apiRequest(`/recommend/${encodeURIComponent(employeeId)}`),
       ]);
+      if (request !== employeeRequest.current) return;
       setEmployeeDetail(detail);
       setRecommendations(recs.recommendations || []);
     } catch (exc) {
+      if (request !== employeeRequest.current) return;
       setEmployeeDetail(null);
       setRecommendations([]);
       setError(exc.message);
     } finally {
-      setLoadingEmployee(false);
+      if (request === employeeRequest.current) setLoadingEmployee(false);
     }
   }
 
@@ -176,6 +180,7 @@ function App() {
 
   useEffect(() => {
     loadEmployee(selectedId);
+    return () => { employeeRequest.current += 1; };
   }, [selectedId]);
 
   const filteredEmployees = useMemo(() => {
@@ -191,6 +196,7 @@ function App() {
 
   async function markComplete(recommendation) {
     if (!selectedId || completingEvent) return;
+    const request = employeeRequest.current;
     setCompletingEvent(recommendation.event_id);
     setError("");
     try {
@@ -204,7 +210,7 @@ function App() {
         }),
       });
       setEmployeeDetail((current) =>
-        current
+        current?.profile.employee_id === result.employee_id
           ? {
               ...current,
               profile: { ...current.profile, skills: result.skills },
@@ -218,6 +224,9 @@ function App() {
           {
             event_id: recommendation.event_id,
             title: recommendation.title,
+            type: recommendation.type,
+            date: employeeDetail.as_of_date,
+            status: "completed",
             record_id: result.record_id,
             skill_changes: result.skill_changes,
           },
@@ -225,7 +234,7 @@ function App() {
         ],
       }));
       const recs = await apiRequest(`/recommend/${encodeURIComponent(selectedId)}`);
-      setRecommendations(recs.recommendations || []);
+      if (request === employeeRequest.current) setRecommendations(recs.recommendations || []);
       await loadHrOverview();
     } catch (exc) {
       setError(exc.message);
@@ -257,6 +266,7 @@ function App() {
         setView("employee");
         setSelectedId(nextId);
       }
+      if (!nextId || nextId === selectedId) await loadEmployee(nextId || selectedId);
     } catch (exc) {
       setError(exc.message);
       throw exc;
@@ -317,7 +327,7 @@ function App() {
 
           {view === "employee" ? (
             <EmployeeView
-              detail={employeeDetail}
+              detail={employeeDetail?.profile.employee_id === selectedId ? employeeDetail : null}
               recommendations={recommendations}
               loading={loadingEmployee}
               completingEvent={completingEvent}
@@ -502,6 +512,14 @@ function EmployeeView({ detail, recommendations, loading, completingEvent, compl
   }
 
   const { profile, trajectory } = detail;
+  const historyById = new Map((detail.activity_history || []).map((item) => [item.record_id, item]));
+  for (const item of completions) {
+    historyById.set(item.record_id, { ...historyById.get(item.record_id), ...item });
+  }
+  const activities = [...historyById.values()].sort(
+    (a, b) => b.date.localeCompare(a.date) || b.record_id.localeCompare(a.record_id),
+  );
+  const completedCount = activities.filter((item) => item.status === "completed").length;
 
   return (
     <div className="space-y-5">
@@ -548,36 +566,39 @@ function EmployeeView({ detail, recommendations, loading, completingEvent, compl
         <SkillTable skills={trajectory.skills} />
       </section>
 
-      <section className="panel">
+      <section className="panel" aria-labelledby="activity-history-heading">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="panel-title">Completed Activities</h2>
-            <p className="text-sm text-slate-500">Completions made from this screen</p>
+            <h2 id="activity-history-heading" className="panel-title">Completed / Past activities</h2>
+            <p className="text-sm text-slate-500">{completedCount} completed / {activities.length} total</p>
           </div>
           <CheckCircle2 className="h-5 w-5 text-slate-400" aria-hidden="true" />
         </div>
-        {completions.length ? (
-          <div className="mt-4 space-y-3">
-            {completions.map((item) => (
-              <div key={item.record_id} className="completion-row">
-                <div>
+        {activities.length ? (
+          <ul className="mt-4 max-h-96 space-y-3 overflow-y-auto" aria-label="Activity history">
+            {activities.map((item) => (
+              <li key={item.record_id} className="completion-row">
+                <div className="min-w-0 break-words">
                   <p className="font-medium text-slate-900">{item.title}</p>
                   <p className="mt-1 text-xs text-slate-500">
-                    {item.event_id} / record {item.record_id}
+                    {item.event_id} / {item.type.replaceAll("_", " ")} / <time dateTime={item.date}>{formatDate(item.date)}</time>
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {item.skill_changes.map((change) => (
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <Pill tone={item.status === "completed" ? "green" : item.status === "in_progress" ? "blue" : "amber"}>
+                    {item.status.replaceAll("_", " ")}
+                  </Pill>
+                  {item.skill_changes?.map((change) => (
                     <Pill key={change.skill_id} tone={change.gain > 0 ? "green" : "slate"}>
                       {change.skill_id}: {formatNumber(change.before)} to {formatNumber(change.after)}
                     </Pill>
                   ))}
                 </div>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         ) : (
-          <EmptyState title="No completion posted in this UI session" body="Historical employee activity is kept out of the profile endpoint." />
+          <EmptyState title="No activities recorded yet" />
         )}
       </section>
 
