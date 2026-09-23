@@ -126,6 +126,30 @@ def test_recommendation_slim_default_debug_full_and_trap(api):
         assert client.get(f"/recommend/TEST_EMPLOYEE?limit={limit}").status_code == 422
 
 
+@pytest.mark.parametrize("environment", [
+    {},
+    {"LLM_MODEL": "local-test-model", "LLM_BASE_URL": "http://localhost:11434/v1"},
+    {"LLM_MODEL": "local-test-model", "LLM_BASE_URL": "http://localhost:11434/v1", "LLM_API_KEY": ""},
+], ids=["no-llm-settings", "key-omitted", "key-empty"])
+def test_startup_without_llm_key_uses_template(api, monkeypatch, environment):
+    _, _, settings = api
+    for name in ("LLM_MODEL", "LLM_BASE_URL", "LLM_API_KEY", "LLM_TIMEOUT_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    app = create_app(**{**settings, "llm_settings": None})
+    with patch("backend.explain._call_model", side_effect=AssertionError("No-key path must stay offline")) as model:
+        with TestClient(app) as client:
+            assert client.get("/health").json() == {"status": "ok"}
+            response = client.get("/recommend/TEST_EMPLOYEE")
+            assert response.status_code == 200, response.text
+            rows = response.json()["recommendations"]
+            assert rows
+            assert all(row["explanation"]["source"] == "template" for row in rows)
+            assert all(row["explanation"]["fallback_reason"] == "no_api_key" for row in rows)
+        model.assert_not_called()
+
+
 def test_employee_history_has_event_details_all_statuses_and_no_other_employees(api):
     client, app, _ = api
     statuses = ("completed", "in_progress", "dropped", "no_show", "declined", "overdue")

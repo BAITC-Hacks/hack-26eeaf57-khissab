@@ -32,12 +32,13 @@ SQLite in /storage
 ## One-Command Run
 
 ```bash
-docker compose up
+cp .env.example .env    # optional; app runs without it
+docker compose up --build
 ```
 
-Docker is the primary run path. Before starting a fresh clone, place the separately supplied starter kit in `data/` as described below. Open the frontend at http://localhost:5173 and backend health check at http://localhost:8000/health. The frontend uses Vite's `/api` proxy in Compose, so browser requests stay on the frontend origin while the proxy forwards to the backend service.
+Docker is the primary run path. Use Docker Compose 2.24.0 or newer (`docker compose version`): [optional env files](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/#additional-information-1) require this version. Before starting a fresh clone, place the separately supplied starter kit in `data/` as described below. Open the frontend at http://localhost:5173 and backend health check at http://localhost:8000/health. The frontend uses Vite's `/api` proxy in Compose, so browser requests stay on the frontend origin while the proxy forwards to the backend service.
 
-`docker compose up` works fully without any API key via the deterministic template fallback. `.env.example` is used by Compose by default. `LLM_MODEL` selects the optional explanation model; `LLM_API_KEY` is optional. Recommendation selection remains local. Runtime must work offline; the initial image/dependency build requires packages and base images to be available or cached before disconnecting.
+The backend loads committed `.env.example` defaults first, then gitignored `.env` overrides when that file exists. Missing `.env`, an omitted `LLM_API_KEY`, or an empty key uses deterministic template explanations without making model requests. Only `VITE_API_URL` and `VITE_API_PROXY_TARGET` are passed to the frontend, with working Compose defaults when unset or empty. See [Enable a local LLM (optional)](#enable-a-local-llm-optional) to opt into model explanations. Recommendation selection remains local. Runtime must work offline; the initial image/dependency build requires packages and base images to be available or cached before disconnecting.
 
 `DATABASE_URL=sqlite:////app/storage/career_quest.sqlite3` points to `/app/storage` in the container, bind-mounted from the repo's gitignored `/storage/` directory. First startup creates the directory/file and seeds it transactionally. Subsequent starts validate the source dataset but preserve the existing database, including progress and any later uploads. No prebuilt database or secret is required or committed.
 
@@ -48,13 +49,29 @@ git clone https://github.com/BAITC-Hacks/hack-26eeaf57-khissab.git
 cd hack-26eeaf57-khissab
 mkdir -p data
 cp -R /path/to/career_quest_dataset/. data/
-cp .env.example .env
-docker compose up --build -d
+cp .env.example .env    # optional; app runs without it
+docker compose up --build
+```
+
+After backend startup, check from another terminal:
+
+```bash
 curl --fail http://localhost:8000/health
 docker compose logs --tail=50 backend frontend
 ```
 
-Wait for backend startup before the health check. A clean clone needs the P5.1 commit on the remote to include employee history. Building images initially requires network access or cached base images/packages; once prepared, `docker compose up --no-build` runs offline. Stop with `docker compose down`; the bind-mounted SQLite file remains.
+Building images initially requires network access or cached base images/packages; once prepared, `docker compose up --no-build` runs offline. Stop with `docker compose down`; the bind-mounted SQLite file remains.
+
+### No-Key Check
+
+On a fresh clone, skip the optional copy to check startup without `.env`. Alternatively, leave `LLM_API_KEY` empty or omit it from `.env`. Use the same `docker compose up --build` command; after startup, run in another terminal:
+
+```bash
+docker compose config --quiet
+curl --fail -sS 'http://localhost:8000/recommend/E0002?limit=1'
+```
+
+Expect HTTP 200, a nonempty `recommendations` array, `recommendations[0].explanation.source == "template"`, and `fallback_reason == "no_api_key"`. The API regression test `test_startup_without_llm_key_uses_template` covers startup with no LLM settings, a configured model/endpoint with the key omitted, and an explicitly empty key; it asserts no model call occurs. Run it with `python -m pytest backend/tests/test_api.py -k startup_without_llm_key -q`.
 
 ## Local run without Docker
 
@@ -244,15 +261,9 @@ python -m pytest backend/tests -q
 
 The CLI retains the full recommendation/factors object and adds `explanation.text`, `source` (`template` or `llm`), `model`, `fallback_reason`, and `validated_fact_ids`. It does not write to SQLite. The P4 `/recommend/{id}` endpoint returns this text as `rationale`, provenance as `explanation`, and slim factors by default.
 
-The optional adapter uses a local server implementing OpenAI-compatible Chat Completions function calls. No model is bundled or downloaded automatically. Configure a gitignored `.env` with `LLM_BASE_URL` (for example `http://127.0.0.1:11434/v1`), `LLM_MODEL` matching a model already loaded on that server, and its optional authentication token in `LLM_API_KEY`. The sample `gpt-4o-mini` is only a configurable model identifier; it does not configure or contact a cloud provider. Because an empty key always chooses the template, an unauthenticated local server may use a non-secret placeholder such as `LLM_API_KEY=local` to opt into the adapter.
+## Enable a local LLM (optional)
 
-```bash
-python -m backend.explain E0002 --data-dir ./data --env-file .env --limit 1
-```
-
-Existing shell variables take precedence over `.env`. In particular, unset an exported empty `LLM_API_KEY` before using `--env-file`. Compose continues to use `.env.example` and the no-key template by default. Editing `.env` alone does not change the container's environment; use the explicit override below for the live-model check.
-
-With a tool-capable model server already running on the host, edit these entries in `.env` (replace the model ID and port with those of your server):
+The adapter uses a local server implementing OpenAI-compatible Chat Completions function calls. No model is bundled or downloaded automatically. With a tool-capable model server already running on the host, create `.env` if needed (`cp .env.example .env`), then edit these entries (replace the model ID and port with those of your server):
 
 ```dotenv
 LLM_MODEL=your-loaded-model-id
@@ -261,23 +272,25 @@ LLM_API_KEY=local
 LLM_TIMEOUT_SECONDS=8
 ```
 
-Use the server's token instead of `local` if it requires authentication. Then recreate the backend with `.env` appended after the default env file:
+Use the server's token instead of `local` if it requires authentication. For an unauthenticated local server, the non-secret `local` placeholder opts into the adapter; an empty key always chooses templates. The sample `gpt-4o-mini` in `.env.example` is only a configurable identifier, not a bundled model or cloud connection. Start or reapply the configuration with the normal command (an existing container is recreated when its environment changes):
 
 ```bash
-docker compose -f docker-compose.yml -f - up -d --force-recreate backend <<'YAML'
-services:
-  backend:
-    env_file:
-      - .env
-YAML
+docker compose up --build
+```
+
+After backend startup, run in another terminal:
+
+```bash
 curl --fail -sS 'http://localhost:8000/recommend/E0002?limit=1'
 ```
 
-Wait for backend startup before the request. Verify `recommendations[0].explanation.source` is `llm` and `fallback_reason` is null. A successful HTTP response alone is not proof of live LLM use: the API deliberately returns templates when the model fails. Repeat the same Compose override when recreating the backend with your model settings.
+Verify `recommendations[0].explanation.source == "llm"` and `fallback_reason` is null. A successful HTTP response alone is not proof of live LLM use: the API deliberately returns templates when the model fails. `docker compose restart` does not reload environment changes; use `docker compose up --build` after editing `.env`.
 
 `explain.py` sends `POST ${LLM_BASE_URL}/chat/completions` with `Authorization: Bearer ${LLM_API_KEY}`. Set the base URL to the API prefix, usually `/v1`, not the full `/chat/completions` path. It expects OpenAI-compatible **Chat Completions function calling**, including a forced `submit_explanation` tool call and `strict: true` schema. The response must contain exactly one `choices[0].message.tool_calls` entry with JSON-string `function.arguments` shaped as `{"clauses":[{"fact_id":"grade","phrasing":"direct"}, ...]}` covering every supplied fact once; free text or incompatible tool output triggers fallback. This is not the Responses API or a server's native `/api/chat` endpoint.
 
 For a local Python backend, use `LLM_BASE_URL=http://127.0.0.1:<port>/v1` in `.env` and start it from the repo root with `DATA_DIR=./data DATABASE_URL=sqlite:///./storage/career_quest.sqlite3 .venv/bin/python -m uvicorn backend.main:app --env-file .env --host 127.0.0.1 --port 8000`. Unset any exported `LLM_*` variables that would override the file.
+
+To check the adapter directly from the local Python environment, run `python -m backend.explain E0002 --data-dir ./data --env-file .env --limit 1`. Existing shell variables take precedence over `.env` for this CLI; unset an exported empty `LLM_API_KEY` before using `--env-file`.
 
 From Docker Desktop, use `http://host.docker.internal:<port>/v1` for a model running on the host. The adapter accepts loopback and `host.docker.internal` endpoints only, ignores proxy environment variables, and does not follow redirects. Remote endpoints fall back to the template under the repo's offline rule. The model service itself must also operate locally without forwarding to a cloud provider.
 
