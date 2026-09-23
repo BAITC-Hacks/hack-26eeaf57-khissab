@@ -6,7 +6,7 @@ Career Quest is an offline-first employee development navigator. It recommends 1
 
 ## Status
 
-P0 scaffold and P1 dataset loader/validation are in place. The backend seeds SQLite on startup and exposes `/health`; the frontend is still a placeholder. The engine, explanation layer, business API endpoints, UI, and final polish follow in P2-P6.
+P0 scaffold, P1 dataset loader/validation, and P2 deterministic recommendation engine are in place. The backend seeds SQLite on startup and exposes `/health`; the frontend is still a placeholder. Run the engine through the CLI below. The explanation layer, business API endpoints, UI, and final polish follow in P3-P6.
 
 ## Architecture
 
@@ -107,7 +107,7 @@ python3 -m backend.loader --data-dir ./data --database-url sqlite:///./storage/c
 
 Validation checks unique skill, employee, event, history, and role/grade IDs; all skill references in employee skills, role requirements, critical skills, event gains, and prerequisites; employee role/grade and career-goal references; manager IDs (including Lead/same-department constraints); event target roles/grades; and history employee/event IDs. Invalid reference diagnostics include the offending record and field. Any validation error exits nonzero before database writes. SQLite foreign keys additionally enforce employee/manager, role/grade, and history relations.
 
-P1 covers dataset ingestion and validation as the foundation for the TZ's profile/history and additional test-profile requirements. The upload endpoint and user-facing must-have scenarios remain scheduled for later phases; no recommendation or trap-profile result is claimed yet.
+P1 covers dataset ingestion and validation as the foundation for the TZ's profile/history and additional test-profile requirements. P2 verifies the recommendation core and trap profile below. The upload endpoint and user-facing must-have scenarios remain scheduled for later phases.
 
 ## API Surface
 
@@ -122,8 +122,44 @@ Planned endpoints from the binding spec:
 
 ## Recommendation Rules
 
-The backend engine will use the deterministic formula from `AGENTS.md`: target-grade skill gaps, critical-skill weighting, hard eligibility filters, event benefit capped by `max_level`, engagement-history weighting, and a machine-readable `factors` object. The LLM never selects recommendations; it only explains computed factors.
+`backend/engine.py` implements the agreed formula with named constants `CRITICAL_WEIGHT=3.0`, `DECLINE_PENALTY=0.6`, and `SELF_COMPLETE_BONUS=1.15`. The LLM never selects recommendations; it only explains computed factors in P3. The engine uses no API key, network, or additional dependencies. Weights are fixed in code, not environment overrides.
+
+1. Use `career_goal.target_grade` when set, otherwise the next grade in Junior, Middle, Senior, Lead. For a Lead without a target, use Lead requirements. Role requirements come from `career_goal.target_role` when set, otherwise the employee's role.
+2. Current skill is the assessed `employee.skills` value, defaulting to 0. Per the P2 clarification, history does not recompute skills, including completions after `last_review_date`. For each target requirement, `gap = max(0, required - current)`.
+3. Hard eligibility uses the employee's **current** role and grade, every prerequisite, `mandatory == false`, and no prior completion of that **event_id**. Only `EV_036` bypasses completed-event exclusion; all other filters still apply. Failed filters receive score 0 and exclusion reasons.
+4. For each developed skill with a positive target gap, `effective_gain = max(0, min(gain, max_level - current, gap))`. Multiply by 3 for a target-grade critical skill, otherwise by 1, and sum as benefit. The zero floor is the user's P2 correction: an above-cap skill cannot penalize other useful skills on the event.
+5. Count the employee's prior declined, no_show, and dropped records across **all events of the candidate's type**. Count prior self-initiated completions by that same type. `engagement = clamp(0.6 ** skips * 1.15 ** self_completions, 0.2, 1.3)`, clamping once after multiplying. `score = benefit * engagement`.
+6. Return the top 1-3 eligible positive-score events, or an empty list when none can help. Do not pad with zero-benefit or ineligible events. Break ties by earliest upcoming session (self-paced is available on the snapshot date), shorter duration, then higher mean non-null feedback rating for that event. Events without upcoming sessions sort last on availability; no ratings sort after rated events. Exact remaining ties use event ID for reproducibility.
+
+The dataset snapshot (`2026-10-01`) is the clock for historical records and upcoming sessions, including records/sessions on that date. Future-dated history does not affect completion exclusion, engagement, or feedback averages. The core leaves scores unrounded.
+
+Each recommendation's `factors` contains target/current role and grade, gaps used with current/required levels, critical flags, capped gains, weights and contributions, total benefit, the selected event type's engagement multiplier, and tie-break values. `engagement_by_type` includes counts and weighted history records with IDs, statuses, dates, and initiators. Other types provide context for alternatives; only the candidate's type changes its score. This preserves the skipped-type evidence even when that type's event falls outside the top three.
+
+## Engine Verification (P2)
+
+From the repository root, run offline with standard Python:
+
+```bash
+python3 -m unittest discover -s backend/tests -v
+python3 -m backend.engine E0002 --data-dir ./data
+```
+
+The CLI validates the source dataset and prints recommendations with complete factors. It reads the original assessed profiles from `data/` and does not read or modify the persisted SQLite database. Add `--limit 1` or `--limit 2` to request fewer steps. Application/SQLite integration is scheduled for P4.
+
+For application code, `RecommendationEngine(validated_dataset).recommend(employee_id, limit=3)` returns the ranked list. `evaluate(employee_id)` returns all candidate scores, eligibility flags, and hard-filter exclusion reasons for inspection. Tests cover every hard filter, by-type history, by-ID completion exclusion, the `EV_036` exception, mixed penalty/bonus clamping, missing skills, target grades, the zero-floor edge case, tie-break order, deterministic output, and all 200 starter-kit employees.
+
+P2 verifies the deterministic selection and numeric multi-factor evidence behind the TZ recommendation requirement, including the adversarial check below. Natural-language explanations, upload/complete HTTP flows, and Employee/HR views remain for P3-P5.
 
 ## Trap Profile Test
 
-The final README will include upload instructions and a reproducible trap-profile check showing that the engine does not choose a recommendation from a single lowest skill alone.
+Run just the adversarial test:
+
+```bash
+python3 -m unittest backend.tests.test_engine.EngineTests.test_adversarial_trap_requires_both_type_history_and_critical_weight -v
+```
+
+The synthetic Middle-to-Senior profile has a unique lowest skill, Public Speaking at 0 with a requirement of 5. Its eligible workshop could close all 5 levels, so it is the strongest unpenalized candidate. Three prior records on **different** workshop IDs (one declined, one no_show, one dropped) reduce its multiplier to `0.6 ** 3 = 0.216`, yielding score `1.08`.
+
+System Design is 2 against a critical requirement of 4; its eligible course gains 1 level and scores `1 * 3 = 3`. Two other eligible activities each score 2. The top three are therefore the critical course and those two alternatives, with the lowest-skill workshop excluded. Returned factors retain the critical gap and all three workshop skip records.
+
+The test also proves the case is adversarial: removing history makes the lowest-skill workshop rank first; removing critical weighting makes the critical course fall outside the top three. The separate above-cap test proves that `current > max_level` with `current < required` contributes 0, leaves other useful contributions intact, and excludes an event with no remaining benefit. Upload instructions for this fixture will follow with the P4 endpoint.
