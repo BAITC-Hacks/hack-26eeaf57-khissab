@@ -237,7 +237,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(factors["gaps_used"][0]["current"], 2)
         self.assertEqual(factors["skill_basis"], "assessed_employee_skills")
 
-    def test_type_engagement_compounds_and_clamps_only_the_final_product(self):
+    def test_type_engagement_caps_self_factor_then_clamps_product(self):
         for skips, completions in ((0, 0), (1, 0), (3, 0), (4, 0), (0, 1), (0, 2), (1, 3), (4, 2)):
             with self.subTest(skips=skips, completions=completions):
                 events = [event("CANDIDATE")]
@@ -248,10 +248,20 @@ class EngineTests(unittest.TestCase):
                     history.append(record(f"R{index}", event_id, "declined" if index < skips else "completed"))
                 result = RecommendationEngine(dataset(events, history)).recommend("TEST_EMPLOYEE")[0]
                 factors = result["factors"]
-                expected = max(0.2, min(1.3, 0.6 ** skips * 1.15 ** completions))
+                expected = max(0.2, min(1.3, 0.6 ** skips * min(1.15 ** completions, 1.3)))
                 self.assertAlmostEqual(factors["engagement_multiplier"], expected)
                 self.assertAlmostEqual(result["score"], 3 * expected)
                 self.assertEqual(factors["engagement_by_type"]["course"]["self_completion_count"], completions)
+
+    def test_three_self_completions_cap_self_factor_before_decline_multiplication(self):
+        events = [event("CANDIDATE")] + [event(f"PAST_{i}", develops_skills=[]) for i in range(5)]
+        history = [record(f"R{i}", f"PAST_{i}", "completed" if i < 3 else "declined") for i in range(5)]
+        factors = RecommendationEngine(dataset(events, history)).recommend("TEST_EMPLOYEE")[0]["factors"]
+        summary = factors["engagement_by_type"]["course"]
+        self.assertEqual(summary["self_completion_count"], 3)
+        self.assertEqual(summary["self_factor"], 1.3)
+        self.assertAlmostEqual(summary["decline_factor"], 0.36)
+        self.assertAlmostEqual(summary["multiplier"], 0.468)
 
     def test_only_relevant_prior_personal_history_moves_engagement(self):
         data = dataset([event("CANDIDATE"), event("PAST", develops_skills=[]), event("WORKSHOP", type="workshop")], [
@@ -266,6 +276,50 @@ class EngineTests(unittest.TestCase):
         result = next(r for r in RecommendationEngine(data).recommend("TEST_EMPLOYEE") if r["event_id"] == "CANDIDATE")
         self.assertEqual(result["score"], 3)
         self.assertEqual(result["factors"]["engagement_by_type"]["course"]["records"], [])
+
+    def test_unique_eligible_critical_event_exposes_higher_ceiling_gateway(self):
+        data = dataset([
+            event("START", develops_skills=[{"skill_id": SYSTEM, "gain": 1, "max_level": 3}]),
+            event("ADVANCED", prerequisites={SYSTEM: 3}),
+        ])
+        gateways = RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]["factors"]["gateway_to"]
+        self.assertEqual([row["event_id"] for row in gateways], ["ADVANCED"])
+        self.assertTrue(gateways[0]["unlocked_after_completion"])
+        blocker = gateways[0]["blocking_prerequisites"][0]
+        self.assertEqual((blocker["current"], blocker["required"], blocker["after_completion"]), (2, 3, 3))
+        self.assertTrue(blocker["met_after_completion"])
+        self.assertEqual(gateways[0]["critical_skills"][0]["next_max_level"], 5)
+        data.events.append(event("OTHER_ELIGIBLE"))
+        self.assertTrue(all(not row["factors"]["gateway_to"] for row in RecommendationEngine(data).recommend("TEST_EMPLOYEE")))
+
+    def test_gateway_ignores_other_hard_filters_and_no_better_ceiling(self):
+        for overrides in ({"mandatory": True}, {"target_grades": ["Lead"]},
+                          {"target_roles": ["Other"]},
+                          {"develops_skills": [{"skill_id": SYSTEM, "gain": 1, "max_level": 3}]}):
+            with self.subTest(overrides=overrides):
+                data = dataset([
+                    event("START", develops_skills=[{"skill_id": SYSTEM, "gain": 1, "max_level": 3}]),
+                    event("ADVANCED", prerequisites={SYSTEM: 3}, **overrides),
+                ])
+                self.assertEqual(RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]["factors"]["gateway_to"], [])
+        data = dataset([
+            event("START", develops_skills=[{"skill_id": SYSTEM, "gain": 1, "max_level": 3}]),
+            event("ADVANCED", prerequisites={SYSTEM: 3}),
+        ], [record("DONE", "ADVANCED")])
+        self.assertEqual(RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]["factors"]["gateway_to"], [])
+
+    def test_gateway_never_claims_unlock_while_another_prerequisite_is_unmet(self):
+        data = dataset([
+            event("START", develops_skills=[{"skill_id": SYSTEM, "gain": 1, "max_level": 3}]),
+            event("ADVANCED", prerequisites={SYSTEM: 3, SQL: 4}),
+        ])
+        gateway = RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]["factors"]["gateway_to"][0]
+        self.assertFalse(gateway["unlocked_after_completion"])
+        blockers = {row["skill_id"]: row for row in gateway["blocking_prerequisites"]}
+        self.assertTrue(blockers[SYSTEM]["met_after_completion"])
+        self.assertFalse(blockers[SQL]["met_after_completion"])
+        data.events[1]["prerequisites"] = {SQL: 4}
+        self.assertEqual(RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]["factors"]["gateway_to"], [])
 
     def test_availability_then_duration_then_feedback_then_id_break_ties(self):
         cases = [

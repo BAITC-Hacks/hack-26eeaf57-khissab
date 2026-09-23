@@ -12,6 +12,7 @@ from backend.loader import Dataset, GRADES, ROOT, read_dataset, validate_dataset
 CRITICAL_WEIGHT = 3.0
 DECLINE_PENALTY = 0.6
 SELF_COMPLETE_BONUS = 1.15
+MAX_SELF_FACTOR = 1.3
 MIN_ENGAGEMENT = 0.2
 MAX_ENGAGEMENT = 1.3
 SKIP_STATUSES = frozenset({"declined", "no_show", "dropped"})
@@ -67,7 +68,9 @@ class RecommendationEngine:
                 key: record[key] for key in ("record_id", "event_id", "date", "status", "assigned_by")
             } | {"weight": weight})
         for summary in by_type.values():
-            raw = DECLINE_PENALTY ** summary["skip_count"] * SELF_COMPLETE_BONUS ** summary["self_completion_count"]
+            summary["decline_factor"] = DECLINE_PENALTY ** summary["skip_count"]
+            summary["self_factor"] = min(SELF_COMPLETE_BONUS ** summary["self_completion_count"], MAX_SELF_FACTOR)
+            raw = summary["decline_factor"] * summary["self_factor"]
             summary["raw_multiplier"] = raw
             summary["multiplier"] = max(MIN_ENGAGEMENT, min(raw, MAX_ENGAGEMENT))
         return by_type
@@ -95,6 +98,57 @@ class RecommendationEngine:
         if event["event_id"] in completed and event["event_id"] != REPEATABLE_EVENT_ID:
             failures.append("already_completed")
         return failures
+
+    def _add_gateways(self, results: list[dict], current: dict) -> None:
+        eligible_by_skill = defaultdict(list)
+        for result in results:
+            for gap in result["factors"]["gaps_used"]:
+                if gap["critical"] and gap["effective_gain"] > 0:
+                    eligible_by_skill[gap["skill_id"]].append(result["event_id"])
+        for result in results:
+            gateways = []
+            result["factors"]["gateway_to"] = gateways
+            if not result["eligible"] or result["score"] <= 0:
+                continue
+            unique_gaps = {
+                gap["skill_id"]: gap for gap in result["factors"]["gaps_used"]
+                if gap["critical"] and eligible_by_skill[gap["skill_id"]] == [result["event_id"]]
+            }
+            if not unique_gaps:
+                continue
+            projected = dict(current)
+            for gain in self.events[result["event_id"]]["develops_skills"]:
+                level = projected.get(gain["skill_id"], 0)
+                projected[gain["skill_id"]] = level + max(0, min(gain["gain"], gain["max_level"] - level))
+            for locked in results:
+                # A gateway cannot bypass role, grade, mandatory, or completion restrictions.
+                if locked["exclusion_reasons"] != ["unmet_prerequisites"]:
+                    continue
+                event = self.events[locked["event_id"]]
+                better_skills = [
+                    {"skill_id": gain["skill_id"], "skill_name": unique_gaps[gain["skill_id"]]["skill_name"],
+                     "current_max_level": unique_gaps[gain["skill_id"]]["max_level"],
+                     "next_max_level": gain["max_level"], "required": unique_gaps[gain["skill_id"]]["required"]}
+                    for gain in event["develops_skills"]
+                    if gain["skill_id"] in unique_gaps and gain["gain"] > 0
+                    and min(gain["max_level"], unique_gaps[gain["skill_id"]]["required"])
+                    > min(unique_gaps[gain["skill_id"]]["max_level"], unique_gaps[gain["skill_id"]]["required"])
+                ]
+                if not better_skills:
+                    continue
+                blockers = [{
+                    "skill_id": skill_id, "skill_name": self.skill_names[skill_id],
+                    "current": current.get(skill_id, 0), "required": required,
+                    "after_completion": projected.get(skill_id, 0),
+                    "met_after_completion": projected.get(skill_id, 0) >= required,
+                } for skill_id, required in sorted(event["prerequisites"].items()) if current.get(skill_id, 0) < required]
+                if not any(blocker["after_completion"] > blocker["current"] for blocker in blockers):
+                    continue
+                gateways.append({
+                    "event_id": event["event_id"], "title": event["title"],
+                    "critical_skills": better_skills, "blocking_prerequisites": blockers,
+                    "unlocked_after_completion": all(blocker["met_after_completion"] for blocker in blockers),
+                })
 
     def evaluate(self, employee_id: str) -> list[dict]:
         """Score every event; failed hard filters always receive zero and reasons."""
@@ -148,6 +202,7 @@ class RecommendationEngine:
                     },
                 },
             })
+        self._add_gateways(results, current)
         return results
 
     def recommend(self, employee_id: str, limit: int = 3) -> list[dict]:
