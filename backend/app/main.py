@@ -1,6 +1,17 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-app = FastAPI(title="Career Quest API")
+from backend.loader import load_dataset
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.dataset = load_dataset()
+    yield
+
+
+app = FastAPI(title="Career Quest API", lifespan=lifespan)
 
 
 @app.get("/health")
