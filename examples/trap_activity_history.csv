@@ -1,0 +1,4 @@
+record_id,employee_id,event_id,date,due_date,status,completion_pct,score,feedback_rating,assigned_by
+DEMO_SKIP_1,DEMO_TRAP,EV_011,2026-06-01,,declined,0,,,manager
+DEMO_SKIP_2,DEMO_TRAP,EV_011,2026-07-01,,no_show,0,,,self
+DEMO_SKIP_3,DEMO_TRAP,EV_011,2026-08-01,,dropped,50,,,self

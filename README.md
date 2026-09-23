@@ -6,7 +6,7 @@ Career Quest is an offline-first employee development navigator. It recommends 1
 
 ## Status
 
-P0 scaffold, P1 loader/validation, P2 deterministic engine, and P3 explanations are implemented. The backend seeds SQLite on startup and exposes `/health`; the frontend is still a placeholder. Run recommendations and explanations through the CLIs below. Business API endpoints, UI, and final polish follow in P4-P6. The model adapter has offline contract tests; a live model demonstration requires a separately configured local server.
+P0-P4 are implemented: scaffold, validated loader, deterministic engine, grounded explanations, and the FastAPI endpoints below. SQLite persists uploaded profiles/history and completed-event progress. The frontend is still a placeholder; Employee/HR views and final polish follow in P5-P6. The model adapter has mocked contract tests; live-model wiring is deferred until after the frontend.
 
 ## Architecture
 
@@ -17,6 +17,8 @@ React + Vite + Tailwind
         v
 FastAPI backend
         |
+        +-- main.py     -> employee, recommendation, upload, completion, HR APIs
+        +-- store.py    -> consistent snapshots and atomic SQLite transactions
         +-- loader.py   -> validates starter-kit JSON/CSV into SQLite
         +-- engine.py   -> deterministic recommendation scoring
         +-- explain.py  -> LLM rationale with offline template fallback
@@ -51,7 +53,7 @@ export DATA_DIR=./data
 export DATABASE_URL=sqlite:///./storage/career_quest.sqlite3
 export LLM_MODEL=gpt-4o-mini
 export LLM_API_KEY=
-python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Frontend, terminal 2, also starting from the repository root:
@@ -107,18 +109,68 @@ python3 -m backend.loader --data-dir ./data --database-url sqlite:///./storage/c
 
 Validation checks unique skill, employee, event, history, and role/grade IDs; all skill references in employee skills, role requirements, critical skills, event gains, and prerequisites; employee role/grade and career-goal references; manager IDs (including Lead/same-department constraints); event target roles/grades; and history employee/event IDs. Invalid reference diagnostics include the offending record and field. Any validation error exits nonzero before database writes. SQLite foreign keys additionally enforce employee/manager, role/grade, and history relations.
 
-P1 covers dataset ingestion and validation as the foundation for the TZ's profile/history and additional test-profile requirements. P2 verifies the recommendation core and trap profile below. The upload endpoint and user-facing must-have scenarios remain scheduled for later phases.
+P1 covers dataset ingestion and validation as the foundation for the TZ's profile/history and additional test-profile requirements. P2 verifies the recommendation core and trap profile below. P4 verifies upload and completion flows through HTTP; user-facing views remain for P5.
 
 ## API Surface
 
-Planned endpoints from the binding spec:
+| Endpoint | Response / behavior |
+|---|---|
+| `GET /employees` | Array of `{id, name, role, grade, department}` for profile selection. |
+| `GET /employees/{id}` | `{profile, trajectory}`; trajectory includes target role/grade, each required skill's current/required/gap/critical flag, total/critical gaps, and progress percentage. |
+| `GET /recommend/{id}?limit=3` | `{employee_id, as_of_date, recommendations}`; 0-3 positive eligible steps, each with event details, score, slim `factors`, `rationale`, explanation provenance, and `gateway_to`. Empty means no eligible useful step, not an error. |
+| `GET /recommend/{id}?debug=true` | Also includes `debug_factors` with the full engine factors and all engagement types. Default responses and LLM prompts remain slim. |
+| `POST /complete` | JSON `{employee_id, event_id, request_id}`; returns updated `skills`, `skill_changes`, `trajectory`, and persisted record/request IDs. |
+| `POST /upload` | JSON or multipart dataset files; atomic insert of new employees and/or history. Returns inserted counts, new employee IDs, and `reference_errors: 0`. |
+| `GET /hr/overview` | Aggregate target-grade gaps by skill, count of employees with no recommended step, and per-activity participant/status counts. No employee IDs, names, raw history, or engagement factors. |
 
-- `GET /employees`
-- `GET /employees/{id}`
-- `GET /recommend/{id}`
-- `POST /complete`
-- `POST /upload`
-- `GET /hr/overview`
+`trajectory.progress_pct` is `100 * (1 - total_gap / total_required_levels)`, not a promotion decision; skills above a requirement do not inflate it. Completion changes skill levels and trajectory, never the employee's grade automatically. All requests read the persisted SQLite state, so no cache refresh or restart is needed after writes. Requests with unknown employee/event IDs return 404; malformed schemas or broken references return 422; duplicate upload IDs or ineligible completions return 409. A busy database returns 503 with `Retry-After: 1`.
+
+`CORS_ORIGINS` defaults to `http://localhost:5173,http://127.0.0.1:5173`, matching `.env.example`. Set it explicitly if Vite uses another port. CORS permits GET/POST and Content-Type, with no wildcard origin or credentials. OpenAPI is at `/openapi.json`, including both upload formats. The optional `/docs` explorer loads its UI assets from a CDN; the API itself needs no internet.
+
+This is a local hackathon demo API, not an authentication boundary. HR receives aggregates only, but employee/debug routes are unauthenticated. Do not expose the server to untrusted networks or use it for real personnel data before adding authentication and authorization. P5 separates the Employee and HR UI views.
+
+### Complete a Step
+
+```bash
+curl -sS http://127.0.0.1:8000/complete \
+  -H 'Content-Type: application/json' \
+  -d '{"employee_id":"E0002","event_id":"EV_005","request_id":"demo-e0002-ev005-1"}'
+curl -sS http://127.0.0.1:8000/employees/E0002
+curl -sS http://127.0.0.1:8000/recommend/E0002
+```
+
+The server rechecks all hard filters inside the write transaction. Each developed skill becomes `current + max(0, min(gain, max_level - current))`; an above-cap skill never decreases, and actual learning is not capped to the target-grade gap. The new self-initiated completion is dated at the dataset snapshot and immediately affects engagement and completed-event exclusion. Existing historical completions are never replayed into assessed skills.
+
+Use a unique `request_id` (for example a UUID) per intentional completion. A retry with the same ID and employee/event returns the original successful response, including after a restart, without adding gains or history. Reusing the ID for another employee/event returns 409. A new request ID for an already completed event also returns 409, except `EV_036`: a new ID records a new club session, while a retry remains idempotent. Profile, history, and retry response commit together or all roll back. To fetch current state after a replay of an older completion, use `GET /employees/{id}`.
+
+### Upload Extra Profiles and History
+
+`POST /upload` accepts either:
+
+- `application/json`: `{ "meta": {"as_of_date":"2026-10-01"}, "employees": [...], "activity_history": [...] }`. Rows follow the starter-kit fields; history numeric values are numbers and empty optional values are null. Meta and either collection may be omitted, but at least one row is required.
+- `multipart/form-data`: `employees_file` with the `{meta, employees}` JSON wrapper and/or `history_file` with the exact `activity_history.csv` columns. Empty optional CSV values are parsed as null. Supplied metadata must match the snapshot. No file paths or filenames are trusted or written to disk.
+
+Upload size is limited to 2 MiB, at most 1,000 profiles and 10,000 history rows per batch. Uploads are append-only, not an upsert: duplicate employee/record IDs return 409 and never overwrite profiles or progress. All cross-references are checked against the merged existing + uploaded graph before committing, including managers in the same batch. Broken references return field/record diagnostics and roll back the entire batch. Imported history influences recommendations but does not recompute the supplied assessed skills. History-only uploads can refer to existing employees.
+
+The committed `examples/` files contain a newly fabricated profile and three fabricated workshop skips, not starter-kit employee data. With the starter kit loaded, run:
+
+```bash
+curl -sS http://127.0.0.1:8000/upload \
+  -F 'employees_file=@examples/trap_employees.json;type=application/json' \
+  -F 'history_file=@examples/trap_activity_history.csv;type=text/csv'
+curl -sS 'http://127.0.0.1:8000/recommend/DEMO_TRAP?debug=true'
+```
+
+Expected upload: `201`, one employee and three history rows, zero broken references. The critical System Design/API Design course `EV_005` ranks first (score 6), while `EV_011` for the profile's lowest skill, App Security, is absent from the top three after three workshop skips. `debug_factors.engagement_by_type.workshop` retains all three skips and multiplier `0.216`; the regular slim factors show only each recommended activity's relevant type. Running the same upload again returns 409; change all fixture employee/record IDs to try another profile without overwriting the first.
+
+### API Verification (P4)
+
+```bash
+python -m pytest backend/tests -q
+python -m pytest backend/tests/test_api.py -q
+```
+
+Tests cover every endpoint, JSON and file upload round-trips, broken-reference/schema rejection and atomic rollback, same-batch managers, history-only ingestion, immediate recomputation, completion eligibility/caps, concurrent retry safety, repeatable clubs, restart persistence, CORS, HR aggregate privacy, and explanation timeout/fallback behavior. The real-dataset test checks E0002's course multiplier `0.468`, EV_005 score `2.808`, its gateway unlock after completion, and the committed demo upload. Seeded endpoint requests are checked against the 2-second non-LLM budget. Optional explanations are the only slow path, run concurrently with an 8-second ceiling within the 10-second recommendation budget; slow model calls do not block profile reads. All tests use isolated temporary databases and leave `/data` untouched.
 
 ## Recommendation Rules
 
@@ -146,11 +198,11 @@ python3 -m unittest backend.tests.test_engine -v
 python3 -m backend.engine E0002 --data-dir ./data
 ```
 
-The CLI validates the source dataset and prints recommendations with complete factors. It reads the original assessed profiles from `data/` and does not read or modify the persisted SQLite database. Add `--limit 1` or `--limit 2` to request fewer steps. Application/SQLite integration is scheduled for P4.
+The CLI validates the source dataset and prints recommendations with complete factors. It reads the original assessed profiles from `data/` and does not read or modify the persisted SQLite database. Add `--limit 1` or `--limit 2` to request fewer steps. Use the P4 HTTP API to inspect uploaded profiles or completed-event progress in SQLite.
 
 For application code, `RecommendationEngine(validated_dataset).recommend(employee_id, limit=3)` returns the ranked list. `evaluate(employee_id)` returns all candidate scores, eligibility flags, and hard-filter exclusion reasons for inspection. Tests cover every hard filter, by-type history, by-ID completion exclusion, the `EV_036` exception, mixed penalty/bonus clamping, missing skills, target grades, the zero-floor edge case, tie-break order, deterministic output, and all 200 starter-kit employees.
 
-P2 verifies the deterministic selection and numeric multi-factor evidence behind the TZ recommendation requirement, including the adversarial check below. P3 adds grounded rationale. Upload/complete HTTP flows and Employee/HR views remain for P4-P5.
+P2 verifies deterministic selection and numeric multi-factor evidence, including the adversarial check below. P3 adds grounded rationale and P4 adds upload/complete HTTP flows; Employee/HR views remain for P5.
 
 ## Explanations (P3)
 
@@ -161,7 +213,7 @@ python -m backend.explain E0002 --data-dir ./data --template
 python -m pytest backend/tests -q
 ```
 
-The CLI retains the full recommendation/factors object and adds `explanation.text`, `source` (`template` or `llm`), `model`, `fallback_reason`, and `validated_fact_ids`. It does not write to SQLite. No HTTP explanation endpoint is introduced before P4.
+The CLI retains the full recommendation/factors object and adds `explanation.text`, `source` (`template` or `llm`), `model`, `fallback_reason`, and `validated_fact_ids`. It does not write to SQLite. The P4 `/recommend/{id}` endpoint returns this text as `rationale`, provenance as `explanation`, and slim factors by default.
 
 The optional adapter uses a local server implementing OpenAI-compatible Chat Completions function calls. No model is bundled or downloaded automatically. Configure a gitignored `.env` with `LLM_BASE_URL` (for example `http://127.0.0.1:11434/v1`), `LLM_MODEL` matching a model already loaded on that server, and its optional authentication token in `LLM_API_KEY`. The sample `gpt-4o-mini` is only a configurable model identifier; it does not configure or contact a cloud provider. Because an empty key always chooses the template, an unauthenticated local server may use a non-secret placeholder such as `LLM_API_KEY=local` to opt into the adapter.
 
@@ -193,4 +245,4 @@ The synthetic Middle-to-Senior profile has a unique lowest skill, Public Speakin
 
 System Design is 2 against a critical requirement of 4; its eligible course gains 1 level and scores `1 * 3 = 3`. Two other eligible activities each score 2. The top three are therefore the critical course and those two alternatives, with the lowest-skill workshop excluded. Returned factors retain the critical gap and all three workshop skip records.
 
-The test also proves the case is adversarial: removing history makes the lowest-skill workshop rank first; removing critical weighting makes the critical course fall outside the top three. The separate above-cap test proves that `current > max_level` with `current < required` contributes 0, leaves other useful contributions intact, and excludes an event with no remaining benefit. Upload instructions for this fixture will follow with the P4 endpoint.
+The test also proves the case is adversarial: removing history makes the lowest-skill workshop rank first; removing critical weighting makes the critical course fall outside the top three. The separate above-cap test proves that `current > max_level` with `current < required` contributes 0, leaves other useful contributions intact, and excludes an event with no remaining benefit. This unit fixture uses a synthetic event catalog; the separate `DEMO_TRAP` upload example above works against the unchanged starter-kit catalog, and is also tested end to end.

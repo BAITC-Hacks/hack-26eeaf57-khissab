@@ -1,19 +1,3 @@
-from contextlib import asynccontextmanager
+"""Compatibility entry point for the P0/P1 local run command."""
 
-from fastapi import FastAPI
-
-from backend.loader import load_dataset
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    app.state.dataset = load_dataset()
-    yield
-
-
-app = FastAPI(title="Career Quest API", lifespan=lifespan)
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+from backend.main import app  # noqa: F401

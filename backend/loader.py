@@ -255,6 +255,9 @@ SCHEMA = (
         feedback_rating INTEGER, assigned_by TEXT NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS history_employee ON activity_history(employee_id)",
     "CREATE INDEX IF NOT EXISTS history_event ON activity_history(event_id)",
+    """CREATE TABLE IF NOT EXISTS completion_requests (
+        request_id TEXT PRIMARY KEY, employee_id TEXT NOT NULL REFERENCES employees(employee_id),
+        event_id TEXT NOT NULL REFERENCES events(event_id), response TEXT NOT NULL)""",
 )
 
 

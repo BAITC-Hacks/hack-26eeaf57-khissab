@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import os
 from collections import defaultdict
 from datetime import date
@@ -13,6 +14,7 @@ CRITICAL_WEIGHT = 3.0
 DECLINE_PENALTY = 0.6
 SELF_COMPLETE_BONUS = 1.15
 MAX_SELF_FACTOR = 1.3
+MAX_BONUS_COMPLETIONS = math.ceil(math.log(MAX_SELF_FACTOR, SELF_COMPLETE_BONUS))
 MIN_ENGAGEMENT = 0.2
 MAX_ENGAGEMENT = 1.3
 SKIP_STATUSES = frozenset({"declined", "no_show", "dropped"})
@@ -69,11 +71,33 @@ class RecommendationEngine:
             } | {"weight": weight})
         for summary in by_type.values():
             summary["decline_factor"] = DECLINE_PENALTY ** summary["skip_count"]
-            summary["self_factor"] = min(SELF_COMPLETE_BONUS ** summary["self_completion_count"], MAX_SELF_FACTOR)
+            # Capping the exponent also prevents overflow with large uploaded histories.
+            summary["self_factor"] = min(
+                SELF_COMPLETE_BONUS ** min(summary["self_completion_count"], MAX_BONUS_COMPLETIONS),
+                MAX_SELF_FACTOR,
+            )
             raw = summary["decline_factor"] * summary["self_factor"]
             summary["raw_multiplier"] = raw
             summary["multiplier"] = max(MIN_ENGAGEMENT, min(raw, MAX_ENGAGEMENT))
         return by_type
+
+    def trajectory(self, employee_id: str) -> dict:
+        employee = self.employees[employee_id]
+        profile = self._target_profile(employee)
+        skills = [{
+            "skill_id": skill_id, "skill_name": self.skill_names[skill_id],
+            "current": employee["skills"].get(skill_id, 0), "required": required,
+            "gap": max(0, required - employee["skills"].get(skill_id, 0)),
+            "critical": skill_id in profile["critical_skills"],
+        } for skill_id, required in sorted(profile["required_skills"].items())]
+        required_total = sum(row["required"] for row in skills)
+        total_gap = sum(row["gap"] for row in skills)
+        return {
+            "target_role": profile["role"], "target_grade": profile["grade"], "skills": skills,
+            "total_gap": total_gap,
+            "critical_gap": sum(row["gap"] for row in skills if row["critical"]),
+            "progress_pct": round(100 * (1 - total_gap / required_total), 2) if required_total else 100.0,
+        }
 
     def _availability(self, event: dict) -> str | None:
         if event["format"] == "self_paced":

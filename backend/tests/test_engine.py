@@ -72,6 +72,11 @@ def adversarial_dataset():
 
 
 class EngineTests(unittest.TestCase):
+    def test_large_uploaded_history_does_not_overflow_self_bonus(self):
+        data = dataset([event("EV_036"), event("NEXT")], [record(f"DONE_{i}", "EV_036") for i in range(6000)])
+        row = RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]
+        assert row["factors"]["engagement_by_type"]["course"]["self_factor"] == 1.3
+
     def test_adversarial_trap_requires_both_type_history_and_critical_weight(self):
         data = adversarial_dataset()
         validate_dataset(data)
