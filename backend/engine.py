@@ -1,6 +1,7 @@
 """Deterministic, offline recommendations over a validated loader Dataset."""
 
 import argparse
+import copy
 import json
 import math
 import os
@@ -24,7 +25,8 @@ REPEATABLE_EVENT_ID = "EV_036"
 class RecommendationEngine:
     def __init__(self, dataset: Dataset):
         self.as_of = date.fromisoformat(dataset.meta["skills"]["as_of_date"])
-        self.employees = {row["employee_id"]: row for row in dataset.employees}
+        self.employees = {row["employee_id"]: copy.deepcopy(row) for row in dataset.employees}
+        self.assessed_skills = {row["employee_id"]: dict(row["skills"]) for row in dataset.employees}
         self.events = {row["event_id"]: row for row in dataset.events}
         self.profiles = {(row["role"], row["grade"]): row for row in dataset.role_profiles}
         self.skill_names = {row["skill_id"]: row["name"] for row in dataset.skills}
@@ -35,8 +37,28 @@ class RecommendationEngine:
                 self.history[row["employee_id"]].append(row)
                 if row["feedback_rating"] is not None:
                     ratings[row["event_id"]].append(row["feedback_rating"])
-        for rows in self.history.values():
-            rows.sort(key=lambda row: (row["date"], row["record_id"]))
+        live_order = {record_id: index for index, record_id in enumerate(dataset.completion_record_ids)}
+        self.skill_updates = defaultdict(list)
+        for employee_id, rows in self.history.items():
+            rows.sort(key=lambda row: (row["date"], live_order.get(row["record_id"], -1), row["event_id"], row["record_id"]))
+            employee = self.employees.get(employee_id)
+            if employee is None:
+                continue
+            for row in rows:
+                if row["status"] != "completed" or (
+                    row["date"] <= employee["last_review_date"] and row["record_id"] not in live_order
+                ):
+                    continue
+                for gain in self.events[row["event_id"]]["develops_skills"]:
+                    skill_id = gain["skill_id"]
+                    before = employee["skills"].get(skill_id, 0)
+                    after = before + max(0, min(gain["gain"], gain["max_level"] - before))
+                    employee["skills"][skill_id] = after
+                    if after > before:
+                        self.skill_updates[employee_id].append({
+                            "record_id": row["record_id"], "event_id": row["event_id"], "date": row["date"],
+                            "skill_id": skill_id, "before": before, "after": after, "gain": after - before,
+                        })
         self.average_ratings = {
             event_id: sum(values) / len(values) for event_id, values in ratings.items()
         }
@@ -215,7 +237,7 @@ class RecommendationEngine:
                     "current_role": employee["role"], "current_grade": employee["grade"],
                     "target_role": profile["role"], "target_grade": profile["grade"],
                     "gaps_used": gaps_used, "benefit": benefit,
-                    "skill_basis": "assessed_employee_skills",
+                    "skill_basis": "assessment_plus_completed_history",
                     "engagement_type": event["type"], "engagement_multiplier": engagement,
                     # Other types explain alternatives; only this event's type multiplies its benefit.
                     "engagement_by_type": engagement_by_type,

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="32" viewBox="0 0 720 32" role="img" aria-label="FastAPI and Python, React and Vite, SQLite, offline core">
+  <g font-family="Verdana, sans-serif" font-size="12" text-anchor="middle">
+    <rect width="188" height="30" rx="5" fill="#163d2e"/><text x="94" y="20" fill="#fff">BACKEND · FastAPI / Python</text>
+    <rect x="196" width="180" height="30" rx="5" fill="#187653"/><text x="286" y="20" fill="#fff">FRONTEND · React / Vite</text>
+    <rect x="384" width="148" height="30" rx="5" fill="#495f52"/><text x="458" y="20" fill="#fff">STORAGE · SQLite</text>
+    <rect x="540" width="180" height="30" rx="5" fill="#d9ed99"/><text x="630" y="20" fill="#163d2e">OFFLINE CORE · No key</text>
+  </g>
+</svg>

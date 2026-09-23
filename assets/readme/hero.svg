@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="850" viewBox="0 0 1600 850" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">Career Quest — a clear next step, backed by evidence</title>
+  <desc id="description">HackAlem AI, Halyk Bank track. An illustrated recommendation for a Middle to Senior career goal: skill benefit 6 times engagement 0.468 equals score 2.808. The engine selects and AI explains. Starter kit: 200 employees, 60 skills, 40 activities, 2743 participation records.</desc>
+  <defs>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#AFCCB8" opacity=".13"/></pattern>
+  </defs>
+  <rect width="1600" height="850" rx="28" fill="#163D2E"/>
+  <rect width="1600" height="850" rx="28" fill="url(#grid)"/>
+  <path d="M1060-100C750 240 1480 220 1350 570S860 790 970 970" stroke="#244B3B" stroke-width="120"/>
+  <path d="M1060-100C750 240 1480 220 1350 570S860 790 970 970" stroke="#375C48" stroke-width="2"/>
+  <g font-family="Trebuchet MS, Arial, sans-serif">
+    <rect x="80" y="66" width="52" height="54" rx="15" fill="#D9ED99"/>
+    <path d="M100 82H113M100 93H111C119 93 119 105 111 105H99" stroke="#234C35" stroke-width="2.6" stroke-linecap="round"/>
+    <circle cx="98" cy="82" r="3.7" fill="#D9ED99" stroke="#234C35" stroke-width="2.6"/>
+    <circle cx="115" cy="82" r="3.7" fill="#D9ED99" stroke="#234C35" stroke-width="2.6"/>
+    <circle cx="98" cy="105" r="3.7" fill="#D9ED99" stroke="#234C35" stroke-width="2.6"/>
+    <text x="149" y="103" fill="#FAFCF3" font-size="34" letter-spacing="-1.5"><tspan font-weight="bold">career</tspan>quest</text>
+    <text x="1520" y="98" text-anchor="end" fill="#C1D2C4" font-size="16" letter-spacing="2">HACKALEM AI / HALYK BANK TRACK</text>
+
+    <circle cx="85" cy="221" r="4" fill="#D9ED99"/>
+    <text x="102" y="227" fill="#CFDDCE" font-size="16" letter-spacing="3">A LITTLE STEP. A BIG FUTURE.</text>
+    <text x="76" y="329" fill="#FAFCF3" font-size="87" font-weight="bold" letter-spacing="-4">Your next step.</text>
+    <text x="76" y="428" fill="#D9ED99" font-size="87" font-weight="bold" letter-spacing="-4">Backed by</text>
+    <text x="76" y="527" fill="#D9ED99" font-size="87" font-weight="bold" letter-spacing="-4">evidence.</text>
+    <text x="82" y="587" fill="#C2D1C5" font-size="23">Your skills. Your career goal. Your learning history.</text>
+    <text x="82" y="622" fill="#C2D1C5" font-size="23">One clear direction for what comes next.</text>
+
+    <rect x="872" y="181" width="648" height="448" rx="24" fill="#FAFBF6"/>
+    <text x="910" y="229" fill="#64806B" font-size="13" letter-spacing="2">YOUR NEXT CHAPTER</text>
+    <text x="910" y="270" fill="#1A3D2B" font-size="30" font-weight="bold">Middle → Senior</text>
+    <rect x="1331" y="224" width="150" height="36" rx="18" fill="#E8EFDC"/>
+    <text x="1406" y="247" text-anchor="middle" fill="#41633A" font-size="14">Backend Engineer</text>
+    <path d="M910 294H1482" stroke="#DBE3D8"/>
+    <text x="910" y="336" fill="#658260" font-size="13" letter-spacing="1.7">01 / RECOMMENDED NEXT STEP</text>
+    <text x="910" y="380" fill="#1A3D2B" font-size="30" font-weight="bold">System Design Fundamentals</text>
+    <text x="910" y="414" fill="#6D7E70" font-size="18">+1 System Design  ·  +1 API Design</text>
+    <rect x="909" y="445" width="574" height="97" rx="13" fill="#EDF3E6"/>
+    <text x="933" y="473" fill="#61745E" font-size="13">SKILL BENEFIT</text>
+    <text x="933" y="520" fill="#23492E" font-size="36" font-weight="bold">6</text>
+    <text x="1066" y="512" fill="#8C9F85" font-size="29">×</text>
+    <text x="1107" y="473" fill="#61745E" font-size="13">ENGAGEMENT</text>
+    <text x="1107" y="520" fill="#23492E" font-size="36" font-weight="bold">0.468</text>
+    <text x="1275" y="512" fill="#8C9F85" font-size="29">=</text>
+    <text x="1315" y="473" fill="#61745E" font-size="13">SCORE</text>
+    <text x="1315" y="520" fill="#23492E" font-size="36" font-weight="bold">2.808</text>
+    <circle cx="920" cy="585" r="9" fill="#D8E7C8"/>
+    <path d="M916 585L919 588L924 582" stroke="#45693E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="943" y="591" fill="#45633F" font-size="17">The engine selects. AI explains. You decide.</text>
+
+    <path d="M80 693H1520" stroke="#476550"/>
+    <text x="81" y="755" fill="#FAFCF3" font-size="37" font-weight="bold">200</text>
+    <text x="166" y="753" fill="#B9CEBB" font-size="17">employees</text>
+    <text x="390" y="755" fill="#FAFCF3" font-size="37" font-weight="bold">60</text>
+    <text x="451" y="753" fill="#B9CEBB" font-size="17">skills</text>
+    <text x="622" y="755" fill="#FAFCF3" font-size="37" font-weight="bold">40</text>
+    <text x="683" y="753" fill="#B9CEBB" font-size="17">activities</text>
+    <text x="905" y="755" fill="#FAFCF3" font-size="37" font-weight="bold">2,743</text>
+    <text x="1020" y="753" fill="#B9CEBB" font-size="17">history records</text>
+    <rect x="1280" y="718" width="240" height="48" rx="24" stroke="#738F6B"/>
+    <text x="1400" y="748" text-anchor="middle" fill="#E2EDCB" font-size="17">Offline core · Optional AI</text>
+    <text x="81" y="808" fill="#8DAA94" font-size="13" letter-spacing="1.5">CAREER QUEST / CASE 01 / TEAM KHISSAB</text>
+    <text x="1520" y="808" text-anchor="end" fill="#8DAA94" font-size="13">Illustrated example · Fresh starter kit · Snapshot 2026-10-01</text>
+  </g>
+</svg>

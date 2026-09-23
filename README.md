@@ -1,371 +1,465 @@
 # Career Quest
 
-HackAlem AI · Halyk Bank track · Case 1 · Team Khissab
+### A clear next step. Backed by evidence.
 
-Employees receive scattered training, mentoring, and HR notifications without a clear connection to their career goals. The result described in the technical specification (TZ) is formal completion at the deadline and low turnout for voluntary activities despite a spent development budget. Career Quest connects each employee's assessed skills, target-grade requirements, and participation history to 1–3 useful next activities, explains the numbers behind each choice, and updates progress after completion. HR gets an aggregate view of skill gaps and participation. **The deterministic engine selects activities; the optional LLM only explains them.**
+**HackAlem AI · Halyk Bank track · Case 1 · Team Khissab**
 
-## Quickstart with Docker
+![Python and FastAPI, React and Vite, SQLite, offline core](assets/readme/stack.svg)
 
-Prerequisites: Git, Docker with a running daemon, Docker Compose **2.24+** (for the optional `.env` file), and the separately supplied Career Quest starter kit. Keep ports **5173** and **8000** free. Commands below use Bash or Zsh.
+**[Run locally](#start-with-one-command)** · **[Product preview](#preview)** · **[Jury demo](#main-demonstration)** · **[Verification](#verification)** · **[O‘zbekcha qo‘llanma](docs/GUIDE.uz.md)**
+
+![Career Quest: your next step, backed by evidence. Illustrated recommendation with skill benefit 6, engagement 0.468 and score 2.808.](assets/readme/hero.svg)
+
+Career Quest turns an employee’s **skills, career goal and learning history** into 1–3 useful development steps. Each recommendation shows why it fits, what it improves and how its score was calculated. Completing a step updates the employee’s skills and career trajectory; HR sees where the team needs support.
+
+**The deterministic engine selects. An optional language model explains. The employee chooses the next step.**
+
+> Built for the local hackathon defense: synthetic data, local SQLite and a working no-key mode. The core needs no cloud service. Initial Docker builds need internet or cached dependencies; use the [prepared offline workflow](#prepare-for-an-offline-defense) for an offline machine.
+
+## Preview
+
+Real screens from a freshly seeded local app with template explanations. Click any image to inspect it at full size. The banner above is an illustration; the screens below are application captures.
+
+| Choose a workspace | Employee development |
+| :---: | :---: |
+| [![One-click Employee and HR demo entry](assets/readme/screen-welcome.jpg)](assets/readme/screen-welcome.jpg) | [![Employee profile, Senior target and 62 percent skill coverage](assets/readme/screen-employee.jpg)](assets/readme/screen-employee.jpg) |
+| **Start in one click.** Explore the employee experience or HR workspace. | **Know where you stand.** Profile, target, skill gaps and progress together. |
+
+| Recommendations with evidence | HR overview |
+| :---: | :---: |
+| [![Recommended activities with numeric skill benefit, engagement and score](assets/readme/screen-evidence.jpg)](assets/readme/screen-evidence.jpg) | [![HR overview with team skill gaps, participation and employees without a next step](assets/readme/screen-hr.jpg)](assets/readme/screen-hr.jpg) |
+| **Understand the next step.** Inspect the factors behind each recommendation. | **See who needs support.** Open profiles and upload additional jury data. |
+
+## What it solves
+
+A low skill score alone does not tell an employee what to learn next. The activity must help their target grade, be accessible with their current skills, and account for their participation history. Career Quest makes that decision traceable.
+
+| For an employee | For HR and the jury |
+|---|---|
+| A personal trajectory toward the target role and grade | Team skill gaps, including promotion-critical gaps |
+| Up to three eligible, useful next steps | Identifiable employees without a useful next step |
+| Visible gaps, gains, weights and engagement evidence | Participation by activity and status |
+| Completion that updates skills and persists after restart | JSON and CSV upload for additional evaluation profiles |
+
+- **Promotion-aware recommendations:** critical skills weigh 3×; useful gains respect the event ceiling and remaining gap.
+- **History-aware decisions:** skips reduce engagement, while self-initiated completions increase it within a cap.
+- **Grounded explanations:** target, skill gaps and participation evidence always come from machine-readable factors.
+- **Reliable progress:** assessment and learning history stay separate; atomic, idempotent completions avoid double-counting.
+- **Two permission scopes:** employees access their own data; HR can review the team and upload profiles.
+- **Offline operation:** local data, local fonts and a template fallback; OpenAI or a local model is optional.
+
+## Reading map
+
+| I want to… | Go to |
+|---|---|
+| Start the app from a fresh checkout | [One-command run](#start-with-one-command) |
+| Present it in five minutes | [Main demonstration](#main-demonstration) · [O‘zbekcha himoya ssenariysi](docs/GUIDE.uz.md#5-daqiqalik-himoya-ssenariysi) |
+| Understand how recommendations work | [Architecture](#architecture-and-stack) · [Scoring rules](#recommendation-rules) |
+| Test a new or adversarial profile | [Trap upload](#upload-and-test-a-trap-profile) · [API](#api) |
+| Configure access or an optional model | [Authentication](#jury-access-and-private-sign-in) · [Model configuration](#openai-and-local-explanations) |
+| Verify the implementation | [Acceptance evidence](#verification) · [Detailed record](VERIFICATION.md) |
+| Resolve a startup problem | [Troubleshooting](#troubleshooting) |
+
+## Start with one command
+
+### 1. Check prerequisites
+
+| Requirement | Details |
+|---|---|
+| Docker | Docker Desktop, or Docker Engine with the Compose plugin; Docker must be running |
+| Compose | **2.24+** for the optional local `.env` file syntax |
+| Ports | `5173` for the app and `8000` for the backend; both bind to loopback |
+| Dataset | The separately supplied Career Quest starter kit; it is intentionally excluded from Git |
+| First build | Internet access or already cached base images and dependencies |
+
+Docker handles Python and Node; **neither is required on the host** for this path. Commands below run from the repository root. On Windows, use Docker Desktop with WSL2; the offline `.sh` scripts run in WSL or another Bash environment.
+
+```bash
+docker info
+docker compose version
+```
+
+### 2. Clone and place the dataset
 
 ```bash
 git clone https://github.com/BAITC-Hacks/hack-26eeaf57-khissab.git
 cd hack-26eeaf57-khissab
-```
-
-Extract the supplied starter kit so that `case_1/career_quest_dataset/` is inside this repository. If it is elsewhere, replace that source path in the copy command:
-
-```bash
 mkdir -p data
-cp -R case_1/career_quest_dataset/. data/
-cp .env.example .env
-docker compose up --build
 ```
 
-Copy `.env.example` only on initial setup; it contains working defaults with an empty API key. Copying it is optional: Compose also loads `.env.example` directly and applies `.env` overrides if present.
+Extract the supplied starter kit and copy the **contents of `career_quest_dataset/`** into `data/`. The JSON and CSV files must be directly inside `data/`, not one folder deeper:
 
-Open:
+```text
+data/                         # local only, gitignored
+├── README.md                 # supplied schema documentation
+├── employees.json
+├── events.json
+├── skills.json
+└── activity_history.csv
+```
 
-- **App:** [http://localhost:5173](http://localhost:5173)
-- **API health:** [http://localhost:8000/health](http://localhost:8000/health)
-- **API schema:** [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
-- **Interactive API docs:** [http://localhost:8000/docs](http://localhost:8000/docs) (its Swagger UI assets need internet; the app and API do not).
+If your kit is already at `case_1/career_quest_dataset/`, use `cp -R case_1/career_quest_dataset/. data/`. A fresh Git clone does not contain that ignored folder. The app validates references at startup; the expected starter-kit counts are listed [below](#dataset-and-skill-progress).
 
-From a second terminal in the repository root:
+### 3. Start
 
 ```bash
-curl --fail -sS http://localhost:8000/health
-curl --fail -sS 'http://localhost:8000/recommend/E0002?limit=1'
+docker compose up
 ```
 
-Expect `{"status":"ok"}` and a recommendation with `explanation.source: "template"` and `explanation.fallback_reason: "no_api_key"`. No secret, model download, cloud database, or external service is required. The initial image build needs internet or locally cached base images and packages. Prepare these before an offline defense; subsequent startup can use `docker compose up --no-build`.
+Wait for both services to start, then open **[localhost:5173](http://localhost:5173)**. Choose **Try employee view** or **Try HR workspace**. The employee button opens E0002; HR opens the team overview with jury upload access. No `.env`, API key, account setup or second terminal is required.
 
-SQLite is created and seeded on first startup at `storage/career_quest.sqlite3`, mounted as `/app/storage/career_quest.sqlite3`. Restarts preserve uploads and completions. `docker compose down` stops the app and retains this file. Source data is validated on every startup, so keep `data/` present even after seeding. Later additions go through `/upload`; replacing source files does not overwrite an existing database.
-
-### Starter-kit files
-
-| File under `data/` | Contents |
+| Address | Expected result |
 |---|---|
-| `employees.json` | 200 synthetic employee profiles |
-| `events.json` | 40 development activities |
-| `skills.json` | 60 skills, proficiency levels 0–5, and 32 role/grade profiles |
-| `activity_history.csv` | 2,743 participation records |
-| `README.md` | Dataset schema and rules supplied with the kit |
+| [localhost:5173](http://localhost:5173) | Career Quest workspace selection |
+| [localhost:8000/health](http://localhost:8000/health) | `{"status":"ok"}` |
+| [localhost:8000/openapi.json](http://localhost:8000/openapi.json) | API schema; data endpoints still require authentication |
 
-The snapshot date is **2026-10-01**, with history from **2024-10-01 through 2026-09-30**. The engine uses the snapshot as its clock.
+Compose loads [.env.example](.env.example), then an optional existing `.env`. First startup creates SQLite and a private authentication key in `storage/`. Restarts retain uploads, completion progress, access codes and unexpired sessions. Frontend source and local fonts are mounted separately; container dependencies stay in the image.
 
-`data/` and the original `case_1/` folder are gitignored because the starter-kit terms restrict the synthetic data to the hackathon. They must be supplied separately, not committed or published. `storage/` and `.env` are also gitignored to keep local progress, uploaded data, and optional credentials out of Git. The committed `examples/` fixtures are independently fabricated demo data.
+### Day-to-day commands
 
-## Run without Docker
+| Action | Command |
+|---|---|
+| Start in the background and wait for health checks | `docker compose up -d --wait` |
+| Check service health | `docker compose ps` |
+| Inspect the last 100 log lines | `docker compose logs --tail=100 backend frontend` |
+| Follow logs | `docker compose logs -f` |
+| Stop services, keeping local progress | `docker compose stop` |
+| Resume stopped services | `docker compose up -d --wait` |
+| Rebuild after dependency or image configuration changes | `docker compose up --build -d --wait` |
+| Apply backend `.env` changes | `docker compose up -d --force-recreate backend` |
 
-Use Python **3.11+** (the Docker image uses 3.12), Node.js **22** (matching the frontend image), and npm. Install dependencies while online or from a local cache. Copy the starter kit into `data/` as above. Stop Docker services first if they occupy the same ports.
+`Ctrl+C` stops a foreground run. Keep `storage/` and its `.auth-key` together when backing up an installation. Do not delete that directory to troubleshoot a normal restart.
 
-Terminal 1, from the repository root:
+### Jury access and private sign-in
+
+The supplied configuration enables `AUTH_DEMO_MODE=true` only with `APP_ENV=local`. **Anyone who can access this local app can enter the HR workspace**, upload synthetic profiles and change demo progress. This is intended for the local synthetic-data defense. Each button creates an ordinary eight-hour session: the employee session is restricted to E0002, and the HR session has HR permissions. Account keys and access codes are not exposed.
+
+For private account-code sign-in, set `AUTH_DEMO_MODE=false` in your local `.env`, then apply it:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r backend/requirements.txt
-DATA_DIR=./data DATABASE_URL=sqlite:///./storage/career_quest.sqlite3 LLM_API_KEY= \
-  python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+docker compose up -d --force-recreate backend
 ```
 
-Terminal 2, from the repository root:
+This hides the demo buttons and rejects both new demo sign-ins and previously issued demo sessions. Private account-code sessions retain their normal expiry. An `APP_ENV` other than `local` always disables demo access, even when the demo flag is true. The backend also defaults to demo access disabled when the flag is absent.
+
+Use **Use my own account** for a private account; when demo mode is off, the account form is shown directly. The local operator obtains its access code:
 
 ```bash
-cd frontend
-npm install
-VITE_API_URL=/api VITE_API_PROXY_TARGET=http://127.0.0.1:8000 \
-  npm run dev -- --host 127.0.0.1
+docker compose exec backend python -m backend.auth credentials hr
+docker compose exec backend python -m backend.auth credentials employee:E0002
 ```
 
-Open [http://localhost:5173](http://localhost:5173). Vite proxies `/api` requests to the backend and strips the prefix. Compose uses the same proxy with `http://backend:8000`. Python does not automatically load `.env`; the explicit local paths above replace the container-only `/app/...` defaults. The empty key forces offline template explanations.
+Enter `E0002` (or `employee:E0002`) and the returned 10-character `access_code`, or use `hr` for HR. Previously issued long access codes remain valid. Share each employee code only with its owner. Any uploaded employee gets the same account format, for example `DEMO_TRAP` or `employee:DEMO_TRAP`. Codes are never embedded in the frontend or returned by a public endpoint. Keep `storage/*.auth-key` private and backed up with the database; it determines the installation’s login codes.
 
-## Main demo scenario
+Employee sessions can read and complete only their own profile. HR can inspect profiles, upload jury data and open the HR view. Authorization is enforced by every data API, not only by hiding buttons. Anonymous access returns 401; unauthorized employee or HR access returns 403. Sessions expire after eight hours and are revoked on sign-out. Login attempts are rate-limited. Session tokens live in the browser’s session storage; API responses use `Cache-Control: no-store`.
 
-Use a freshly seeded database for the example numbers below; earlier completions change the persisted results.
+### Prepare for an offline defense
 
-1. Open **Employee**. The app selects **E0002** by default. Inspect the Middle Backend Engineer profile, Senior trajectory, skill gaps, and **Completed / Past activities**.
-2. Inspect the first recommendation, **EV_005 — System Design Fundamentals**. Its card shows skill contributions, engagement counts, score, rationale, explanation source, and gateway unlocks. Recommendations always carry numerical evidence.
-3. Click **Mark complete** on EV_005. System Design and API Design both move from **1 to 2**, and trajectory progress moves from **60% to 64%**. The completion appears in history; EV_005 leaves the recommendations and eligible follow-up activities are recomputed. Reloading preserves the update.
-4. Open **HR overview**. It shows the top 10 lagging skills by total missing levels, the **count** of employees without a recommended step, and the top 12 activities by history-record count. The API returns the full aggregate lists.
-5. Use **Upload** to test an unseen jury profile and its history, following the instructions below.
+While images can be built, run:
 
-Progress is `100 × (1 − total_gap / total_required_levels)`, rounded to two decimals. It describes coverage of target requirements; completing an activity does not automatically change the employee's grade.
-
-## Architecture and technology
-
-```text
-Starter-kit JSON / CSV
-          |
-          v
-loader.py: validate references, seed once
-          |
-          v
-SQLite <---- store.py: atomic uploads and completions
-          |
-          v
-engine.py: hard filters, deterministic scoring, top 1–3
-          |
-          v
-explain.py: optional local LLM phrasing + self-check
-           or offline template fallback
-          |
-          v
-FastAPI (backend/main.py)
-          |
-          v
-React + Vite + Tailwind (Employee / HR / Upload)
+```bash
+bash scripts/prepare-offline.sh
 ```
 
-FastAPI coordinates reads, scoring, explanations, and writes. The loader checks unique IDs and references between employees, managers, roles/grades, skills, events, and history before seeding SQLite. Uploads validate the merged dataset and commit atomically. Profile reads and scoring run independently of optional model requests.
+Keep the repository, `data/` and `offline/career-quest-images.tar` on the defense computer. The image bundle matches the build machine’s CPU architecture. Then one command loads the images and starts the app without building or pulling:
 
-The stack is **Python, FastAPI, Pydantic, SQLite, HTTPX, pytest**, and **React 19, Vite 6, Tailwind CSS 3, Lucide icons**, packaged with Docker Compose. There is no vector database, RAG, embedding pipeline, or cloud database.
+```bash
+bash scripts/run-offline.sh
+```
 
-The engine's output is final before explanation begins. The model chooses clause order and one of two supported phrasings per fact through a `submit_explanation` tool call. A local validator requires every supplied fact exactly once and rejects extra claims or numbers. The application renders the wording and numeric values from the original factors. Templates use the same facts when the model is absent or fails.
+This mode explicitly disables both model providers, even if `.env` contains a key. It uses the same deterministic engine, grounded template explanations, authentication and SQLite. The bundle contains images only, not `.env`, private keys or the database. Do not publish the starter kit or private local files. After the normal images are loaded, `docker compose up` also works with empty model keys.
 
-## How recommendations are calculated
+## Architecture and stack
 
-The TZ requires rationale based on **at least three factors**. Each explanation covers the target grade, skill gaps against that grade's requirements (including criticality and effective gain), and participation history, plus the resulting score. A low skill alone is insufficient: an activity must be relevant, accessible, useful, and weighted by the employee's past engagement.
+```mermaid
+flowchart LR
+    Seed["Starter kit · JSON / CSV"] --> Loader["loader.py · validate references"]
+    Loader --> DB[("SQLite · assessment + history")]
+    UI["React · Employee / HR"] <--> API["FastAPI · role + ownership checks"]
+    API --> Store["store.py · atomic upload / completion"]
+    Store <--> DB
+    DB --> Engine["engine.py · eligibility + deterministic scoring"]
+    Engine --> Profile["Profile + trajectory"]
+    Profile --> API
+    Engine --> Factors["0–3 eligible steps + numeric factors"]
+    Factors --> Explain["explain.py · validated tool call / template"]
+    Model["Optional OpenAI / local model"] -. "clause order + phrasing" .-> Explain
+    Explain --> API
+    classDef core fill:#edf5ef,stroke:#187653,color:#163d2e
+    classDef optional fill:#faf5e9,stroke:#a78c56,color:#5d4a26
+    class DB,Engine,Factors,Profile core
+    class Model optional
+```
 
-1. **Choose the target requirements.** Use the employee's career-goal role/grade when supplied; otherwise use the current role and next grade in Junior → Middle → Senior → Lead. A Lead without a target stays at Lead requirements. Missing skills count as zero. Current levels come from assessed `employee.skills`; historical completions are not replayed into those levels, including post-review completions.
-2. **Apply hard eligibility filters.** Require the employee's **current** role and grade to match `target_roles`/`target_grades`, and every skill prerequisite to be met. Exclude mandatory activities and already-completed event IDs. Only recurring club **EV_036** may be repeated; it still must pass the other filters.
-3. **Calculate useful skill gains.** Use `develops_skills`, cap the gain at both the activity's `max_level` and the remaining target gap, and apply a zero floor. Each level toward a target-grade critical skill is worth **3**; other required skills have weight **1**.
-4. **Weight by participation in the activity's type.** Across that employee's prior history, each `declined`, `no_show`, or `dropped` record multiplies the type's penalty by **0.6**. Each self-initiated completion adds a **1.15** multiplier, with the self-completion factor capped at **1.3**. Clamp their product to **0.2–1.3**. History is grouped by **type**, such as course or workshop; completed-event exclusion is by **event ID**.
-5. **Rank useful eligible activities.** Multiply benefit by engagement and return up to three positive-score activities. Return an empty list if none qualifies. Ties use earliest availability, shorter duration, higher average event feedback, then event ID. Self-paced activities are available on the snapshot date; activities without an upcoming session sort last on availability.
+The profile path is independent of model explanations: a pending or failed model request does not delay the profile. Only the engine selects and scores events. No vector database, RAG or embeddings are used.
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| Interface | React 19, Vite 6, Tailwind CSS 3, Lucide | Employee and HR workspaces, numeric evidence, upload and completion |
+| API | Python 3.12 in Docker, FastAPI, Pydantic | Validated contracts, access control and HTTP endpoints |
+| Recommendation | Deterministic Python engine | Effective skills, hard filters, benefit, engagement and tie-breaking |
+| Storage | SQLite | Local assessment/history, sessions, uploads and persistent progress |
+| Explanation | HTTPX, optional OpenAI/local model, templates | Tool-call self-check and grounded fallback |
+| Quality and delivery | pytest, Node test runner, Docker Compose | Regression checks, reproducible builds and offline packaging |
+
+Node 22 is used in Docker. npm installs from the committed lockfile.
+
+### Repository map
 
 ```text
-gap            = max(0, required - current)
-effective_gain = max(0, min(gain, max_level - current, gap))
+backend/
+  auth.py          Local access codes, sessions, role/ownership checks and CLI
+  loader.py        Dataset parsing, validation and one-time seeding
+  engine.py        Skill reconstruction, deterministic scoring and trajectory
+  store.py         Transactions, uploads, completions and legacy migration
+  explain.py       OpenAI/local tool call, validation and template fallback
+  check_llm.py     Explicit live smoke test using fabricated facts only
+  main.py          API routes and HR aggregates
+  schemas.py       Upload and completion contracts
+  uploads.py       JSON/multipart validation
+  tests/           Engine, auth, migration, explanation, loader and API tests
+frontend/
+  src/main.jsx     Sign-in, sessions, navigation and request orchestration
+  src/api.js       Bearer requests and session-aware expiry handling
+  src/ui.jsx       Employee, HR, evidence and upload components
+  src/loadEmployee.js   Independent profile and recommendation loading
+  tests/           Session race and slow/failing recommendation regression checks
+examples/          Fabricated jury trap profile and history
+scripts/           Offline preparation and startup
+assets/readme/     Local banner and real application screenshots
+docs/GUIDE.uz.md   Uzbek startup and five-minute jury walkthrough
+data/             Supplied starter kit (gitignored)
+storage/          Local SQLite and authentication key (gitignored)
+offline/          Prepared Docker images (gitignored)
+```
+
+### Design
+
+The interface uses forest green (`#187653`), deep green (`#163D2E`), light surfaces and locally bundled **Rubik** typography. Lime accents mark the career target; compact evidence cards keep gaps, multipliers and scores visible. Employee development and HR actions have separate navigation. The UI has keyboard focus states, a skip link, labelled controls and independent recommendation loading/error states.
+
+The showcase structure takes inspiration from [Hafiz](https://github.com/abbosoktambayev/hafiz-showcase). The banner and captures here are original Career Quest assets; no Hafiz screenshots or artwork are reused.
+
+## Dataset and skill progress
+
+The dataset has 200 employees, 40 activities, 60 skills, 32 role/grade profiles and 2,743 history records. `2026-10-01` is the snapshot clock. History spans the preceding 24 months. `data/README.md` is the schema authority and explicitly states that all people and data are synthetic.
+
+`employee.skills` is the assessment at `last_review_date`. Effective skills are reconstructed from that baseline plus completed activities strictly after the assessment and on/before the snapshot. Apply events chronologically with:
+
+```text
+new_level = current + max(0, min(gain, max_level - current))
+```
+
+Missing skills start at zero. Skills already above an event’s ceiling never decrease. Non-completed and future records do not add skills. Application completions are known to occur after the assessment, including the same calendar day; their transaction order is retained. The API exposes the effective profile plus `assessed_skills` and a `skill_updates` ledger.
+
+Completion appends history atomically without overwriting the assessment. Repeated reads, uploads and restarts therefore do not double-count learning. Backdated imports are replayed in chronological order. Existing databases from the previous version migrate once: recorded completion before-values restore the assessment baseline, then history supplies the progress. A completion `request_id` makes retries idempotent.
+
+## Recommendation rules
+
+1. Target the career-goal role/grade, otherwise the next grade in Junior → Middle → Senior → Lead. A Lead without a goal keeps Lead requirements.
+2. Require the current role/grade to match the event’s audience and all prerequisites to be met by effective skills. Exclude mandatory and already-completed events; recurring club EV_036 may repeat but must still pass all other filters.
+3. Calculate positive gaps against target requirements. Event benefit is limited by its gain, ceiling and remaining gap. Promotion-critical skills have weight 3, other required skills weight 1.
+4. Weight benefit by the employee’s history of the activity’s type: declines, no-shows and drops lower engagement; self-initiated completions raise it.
+5. Return at most three positive, eligible results. Ties use earliest availability, shorter duration, higher average feedback, then event ID. No eligible useful event returns an empty list.
+
+```text
+gap            = max(0, required - effective_current)
+effective_gain = max(0, min(gain, max_level - effective_current, gap))
 benefit        = sum(effective_gain × (3 if critical else 1))
 decline_factor = 0.6 ^ skip_count
 self_factor    = min(1.15 ^ self_completion_count, 1.3)
 engagement     = clamp(decline_factor × self_factor, 0.2, 1.3)
 score          = benefit × engagement
+progress_pct   = 100 × (1 - total_gap / total_required_levels)
 ```
 
-Future-dated history after the snapshot does not affect scoring, completion exclusion, or feedback tie-breaks. Scores are not rounded internally; the UI formats numbers for display.
+Normal `factors` carry target grade, skill gaps, effective gains, criticality, engagement counts/multipliers, benefit and score. `debug=true` additionally exposes detailed factors for the authorized profile. Historical engagement does not ban an activity; hard eligibility filters do.
 
-**Gateway evidence:** `gateway_to` identifies a higher-ceiling activity blocked only by prerequisites when the recommended event is the sole currently eligible way to improve the relevant critical skill. It shows the unmet prerequisites and projected levels after completion. `unlocked_after_completion` is true only when all blockers would be satisfied. A gateway supplies an explanation of the next path; it adds **no scoring bonus** and bypasses no eligibility rule.
+Gateway evidence describes higher-ceiling activities that a critical-skill step can help unlock. It supplies no scoring bonus and bypasses no prerequisites or audience restrictions. An activity is called unlocked only when all its prerequisite blockers would be met.
 
-### Worked example: E0002
+## Main demonstration
 
-On the untouched starter kit, E0002 is a Middle Backend Engineer targeting Senior. **EV_005** ranks first:
+1. Click **Try employee view** to enter E0002. The initial Middle Backend Engineer targets Senior. History contains Mentor Track completed after the last assessment, so Mentoring is **2**, and trajectory progress is **62%**.
+2. EV_005 System Design Fundamentals ranks first: critical System Design and API Design each contribute 3, benefit is **6**, course engagement is **0.468**, score is **2.808**. Its explanation includes grade, gaps, history and score.
+3. Mark EV_005 complete. System Design and API Design move **1 → 2**, trajectory becomes **66%**, the activity appears in history, and EV_006/EV_007 become eligible. Reload to verify persistence. Grades themselves are not automatically promoted.
+4. Sign out and click **Try HR workspace**. HR overview opens with skill gaps, participation and an actionable list of employees without a step, with names, IDs, target, gaps, reason and an Open button. A satisfied target is distinguished from a gap without a suitable activity.
+5. Upload the trap profile below. Inspect numeric factors and confirm that the lowest skill does not automatically win.
 
-| Skill | Current | Senior requirement | Gap | Critical weight | EV_005 gain / ceiling | Effective gain | Contribution |
-|---|---:|---:|---:|---:|---|---:|---:|
-| System Design | 1 | 4 | 3 | 3 | +1 / level 3 | 1 | 3 |
-| API Design | 1 | 4 | 3 | 3 | +1 / level 3 | 1 | 3 |
+The example numbers assume a freshly seeded database. Existing completions change them.
 
-Benefit is **6**. Course history contains **two drops** (EV_005 and EV_010) and **two self-initiated completions** (EV_012 and EV_010). Therefore:
+## Upload and test a trap profile
 
-```text
-decline_factor = 0.6² = 0.36
-self_factor    = min(1.15², 1.3) = 1.3
-engagement     = 0.36 × 1.3 = 0.468
-EV_005 score   = 6 × 0.468 = 2.808
-```
+Click **Try HR workspace** (or sign in with a private HR code). In **Upload profiles → Files**, choose `examples/trap_employees.json` and `examples/trap_activity_history.csv`, then **Upload and open**. Expect 1 employee and 3 history rows. JSON mode also accepts `{ "employees": [...], "activity_history": [...] }` with optional `meta`.
 
-The earlier drop lowers the score but does not make EV_005 ineligible. Its critical-skill benefit still puts it above EV_036 (**1.0**) and EV_011 (**0.414**). These are the initial top three. JSON may show floating-point precision such as `0.46799999999999997` for `0.468`.
+The independently fabricated DEMO_TRAP has Application Security 0 and three workshop skips. EV_011’s score falls to **0.216** and it is absent from the top three. EV_005 ranks first with **6** from two critical skills and neutral course engagement. The unit test separately reproduces the TZ’s Public Speaking versus System Design trap and removes history/critical weighting independently to prove both are required.
 
-EV_005 is currently the only eligible activity improving these critical gaps. **EV_006 — Designing High-Load Systems** and **EV_007 — Architecture Review Circle** both require System Design **2**, while E0002 has **1**. Completing EV_005 raises it to **2**, so both gateway entries have `unlocked_after_completion: true`. Their System Design ceilings are **5** and **4**, respectively, beyond EV_005's ceiling of **3**.
-
-Inspect the evidence before completing the activity:
+For API checks in local demo mode, obtain an HR session token without any access code:
 
 ```bash
-curl --fail -sS 'http://localhost:8000/recommend/E0002?debug=true'
-```
-
-Normal `factors` contain the chosen event's gaps, engagement counts/multipliers, benefit, score, target grade, and gateways. `debug_factors` additionally contains current/target roles and grades, tie-break values, and weighted personal history across all event types.
-
-## How to test with jury profiles
-
-The defense does not require editing source files or restarting. **POST `/upload`** accepts new employee profiles and/or history in the dataset schema and immediately recomputes recommendations from persisted SQLite state.
-
-### Through the UI
-
-1. In **Upload → Files**, select `examples/trap_employees.json` as **employees_file** and `examples/trap_activity_history.csv` as **history_file**. For jury data, select the equivalent supplied JSON/CSV files.
-2. Click **Upload and open**. Expect **1 employee and 3 history rows** inserted for the demo. The app opens **DEMO_TRAP** automatically.
-3. Inspect the trajectory, past activities, recommendation factors, and rationale. HR aggregates update too.
-
-Alternatively, **Upload → JSON** accepts a batch object with `employees` and `activity_history` arrays, plus optional `meta`. Employee objects use all fields shown in the committed employee fixture. History objects use the CSV column names; numeric values must be JSON numbers and empty optional values must be `null`.
-
-### Through the API
-
-Run from the repository root. Use **either** the UI upload above **or** this command for the demo IDs; submitting both to the same database causes the expected duplicate-ID error.
-
-```bash
-curl --fail -sS -i http://localhost:8000/upload \
+CQ_TOKEN="$(curl --fail -sS http://localhost:8000/auth/demo/login \
+  -H 'Content-Type: application/json' \
+  --data '{"account":"hr"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+curl --fail -sS http://localhost:8000/upload \
+  -H "Authorization: Bearer $CQ_TOKEN" \
   -F 'employees_file=@examples/trap_employees.json;type=application/json' \
   -F 'history_file=@examples/trap_activity_history.csv;type=text/csv'
-
-curl --fail -sS 'http://localhost:8000/recommend/DEMO_TRAP?debug=true'
+curl --fail -sS 'http://localhost:8000/recommend/DEMO_TRAP?debug=true' \
+  -H "Authorization: Bearer $CQ_TOKEN"
 ```
 
-Expected upload status: **201 Created**. Response body:
+In private mode, the local operator can obtain the token using `CQ_TOKEN="$(docker compose exec -T backend python -m backend.auth token hr)"`, then run the same upload and recommendation requests. Tokens are temporary credentials; keep them out of source files.
 
-```json
-{
-  "inserted": {"employees": 1, "activity_history": 3},
-  "employee_ids": ["DEMO_TRAP"],
-  "reference_errors": 0
-}
-```
+Use either the UI or API example for those IDs; submitting both correctly returns duplicate-ID error 409. For a combined JSON batch use `-H 'Content-Type: application/json' --data-binary @jury_batch.json` instead of the file arguments. Multipart employee JSON uses the dataset wrapper with `employees[]`; history CSV uses the original column names. Either collection can be omitted, but the batch must not be empty. All references, including managers in the same upload, are validated. `meta.as_of_date`, when supplied, must match the snapshot.
 
-For a jury-provided combined JSON batch, save it as `jury_batch.json` locally and submit:
+Uploads are append-only, atomic, and limited to 2 MiB, 1,000 profiles and 10,000 history records per request. Invalid input rolls back the entire batch. History-only uploads update effective skills, engagement and completed-event eligibility immediately. Keep uploaded files uncommitted.
 
-```bash
-curl --fail -sS -i http://localhost:8000/upload \
-  -H 'Content-Type: application/json' \
-  --data-binary @jury_batch.json
-```
+## API
 
-Multipart `employees_file` uses the dataset's `{ "meta": ..., "employees": [...] }` wrapper; `meta` is optional. `history_file` uses the exact `activity_history.csv` columns. JSON uses `activity_history` for its history array. Either collection may be omitted, but at least one row is required. Supplied `meta.as_of_date` must be `2026-10-01`. Skill, event, role/grade, manager, and employee references must resolve against the existing data or employees in the same batch.
-
-Uploads are append-only: duplicate employee or history-record IDs return **409**, never overwrite existing progress. Invalid schemas/references return **422** and roll back the whole batch. The limit is **2 MiB**, **1,000 employees**, and **10,000 history rows** per request. A history-only upload can reference an existing employee. Imported history changes engagement and completed-event eligibility; it does not change supplied assessed skill levels. Use fresh IDs throughout the files to repeat a jury test. Keep jury files local and uncommitted.
-
-### Expected trap-profile behavior
-
-The committed **DEMO_TRAP** has Application Security at **0**, its lowest target skill, and three workshop skips: declined, no-show, and dropped. The eligible **EV_011 — Secure Coding Workshop** gains one non-critical level, but its workshop multiplier is `0.6³ = 0.216`, making its score **0.216**. It is **absent from the top three**. **EV_005 ranks first with score 6**, because it develops the promotion-critical System Design and API Design gaps and has neutral course engagement. Inspect `debug_factors.engagement_by_type.workshop` to see all three skips even though the workshop is not recommended.
-
-The unit-test trap mirrors the TZ's **Public Speaking versus System Design** example using a separate synthetic catalog. Public Speaking starts at 0 and its workshop could gain 5 levels, but three skips reduce its score to **1.08**. The critical System Design course scores **3**, followed by two alternatives scoring **2** each. Thus the lowest-skill workshop is excluded. The test also removes history and critical weighting separately to prove that both factors are needed. This is a fixture-specific result of the scoring rule, not a blanket ban on activities a person has skipped.
-
-## API reference
-
-Base URL: `http://localhost:8000`. All responses are JSON; the shapes below list the principal fields.
-
-| Method and path | Request / response shape |
+| Route | Access and behavior |
 |---|---|
-| `GET /health` | `{status: "ok"}` |
-| `GET /employees` | `[{id, name, role, grade, department}]` |
-| `GET /employees/{id}` | `{profile, trajectory, as_of_date, activity_history}`; history is limited to the requested employee, newest first, with event title/type and dataset fields. |
-| `GET /recommend/{id}?limit=3&debug=false` | `{employee_id, as_of_date, recommendations: [{event_id, title, type, format, duration_hours, upcoming_sessions, score, factors, rationale, explanation, gateway_to}]}`. `limit` is 1–3; `debug=true` adds `debug_factors` to each item. Zero useful eligible steps returns `[]`. |
-| `POST /complete` | Body `{employee_id, event_id, request_id}` → `{employee_id, event_id, request_id, record_id, skills, skill_changes, trajectory}`. |
-| `POST /upload` | JSON batch or multipart files described above → `201` with `{inserted: {employees, activity_history}, employee_ids, reference_errors}`. |
-| `GET /hr/overview` | `{as_of_date, employee_count, employees_without_recommendation: {count}, most_lagging_skills, participation_by_activity}`. Skill rows contain `skill_id`, `skill_name`, `total_gap`, `employees_affected`, `critical_employees`; activity rows contain `event_id`, `title`, `type`, `records`, `participants`, `status_counts`. |
+| `GET /health` | Public health check |
+| `GET /auth/demo` | Public demo availability and fixed employee ID; no credentials |
+| `POST /auth/demo/login` | Local demo only: `{account: "employee" \| "hr"}` → ordinary session for E0002 or HR |
+| `POST /auth/login` | `{username, access_code}` → session token, expiry and identity |
+| `GET /auth/me` / `POST /auth/logout` | Current identity / revoke current session |
+| `GET /employees` | Employee sees only self; HR sees all profile summaries |
+| `GET /employees/{id}` | Own profile or HR: effective profile, trajectory, assessment, skill updates and scoped history |
+| `GET /recommend/{id}?limit=3&debug=false` | Own profile or HR: 0–3 steps, numeric factors and grounded rationale |
+| `POST /complete` | Own profile or HR: `{employee_id,event_id,request_id}` → updated skills, changes and trajectory |
+| `POST /upload` | HR only: JSON or multipart dataset profiles/history |
+| `GET /hr/overview` | HR only: lagging skills, identifiable employees without a step and activity participation |
 
-`trajectory` contains `target_role`, `target_grade`, `skills` (current/required/gap/critical), `total_gap`, `critical_gap`, and `progress_pct`. `explanation` contains `source`, `model`, `fallback_reason`, and `validated_fact_ids`; its rendered text is returned as `rationale`.
+All protected requests need `Authorization: Bearer <token>`. Unknown IDs return 404; invalid schemas/references 422; duplicate uploads, ineligible completions and conflicting request IDs 409; oversized uploads 413; unsupported media types 415. A busy database returns 503 with `Retry-After: 1`. EV_036 needs a new request ID for each intentional repeat session. The frontend preserves a request ID on an uncertain network retry.
 
-To exercise completion through HTTP instead of the UI, on the initial E0002 state:
+HR aggregates include only the minimal identities needed for follow-up; no raw histories or engagement records are embedded in the overview. Employee-specific endpoints enforce ownership. OpenAPI is available at `/openapi.json`; optional Swagger `/docs` loads third-party assets and is not part of the offline app.
 
-```bash
-curl --fail -sS http://localhost:8000/complete \
-  -H 'Content-Type: application/json' \
-  -d '{"employee_id":"E0002","event_id":"EV_005","request_id":"jury-e0002-ev005-1"}'
-curl --fail -sS http://localhost:8000/employees/E0002
-```
+## OpenAI and local explanations
 
-Completion rechecks eligibility, persists a self-initiated completion at the snapshot date, and applies `new_level = current + max(0, min(gain, max_level - current))`. Actual learning is capped by the event ceiling, not by the target gap. An above-ceiling skill never decreases. Use a unique `request_id` per intentional completion; retrying the same ID and employee/event returns the saved response without duplicate progress, even after restart. EV_036 requires a new ID for each intentional repeat session.
+The app uses a strict `submit_explanation` function call. The model chooses clause order and a supported phrasing per fact. A local self-check requires all facts exactly once and rejects additional fields, free text, invented numbers, malformed output or missing evidence. Text and numbers are rendered from the engine’s factors. This follows [OpenAI function calling documentation](https://developers.openai.com/api/docs/guides/function-calling).
 
-Unknown profiles or completion employee/event IDs return **404**; malformed input or broken upload references **422**; duplicate uploads, ineligible completion, or conflicting request IDs **409**; oversized uploads **413**; unsupported upload media types **415**. A busy database returns **503** with `Retry-After: 1`. Default CORS origins are `http://localhost:5173` and `http://127.0.0.1:5173`.
-
-## Optional local LLM
-
-The default template path is complete and needs no key. To use a model, first run a **local, tool-capable OpenAI-compatible Chat Completions server**. No model is bundled or downloaded automatically. Edit the following `.env` values for your loaded model and server:
+To enable OpenAI, copy `.env.example` to `.env` only if you do not already have one, then edit locally:
 
 ```dotenv
-LLM_MODEL=your-loaded-model-id
-LLM_BASE_URL=http://host.docker.internal:11434/v1
-LLM_API_KEY=local
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your-private-key
+LLM_MODEL=gpt-4o-mini
 LLM_TIMEOUT_SECONDS=8
 ```
 
-| Variable | Meaning |
-|---|---|
-| `LLM_MODEL` | Loaded model identifier. The starter value `gpt-4o-mini` is only a configurable name, not a bundled model or automatic cloud connection. |
-| `LLM_BASE_URL` | Local API prefix; the adapter appends `/chat/completions`. Only loopback hosts and `host.docker.internal` are accepted. |
-| `LLM_API_KEY` | Nonempty token enables the adapter. Use the server's token, or the non-secret `local` placeholder if it does not require authentication. Empty/omitted always selects templates. |
-| `LLM_TIMEOUT_SECONDS` | Total model-request deadline, default and maximum **8 seconds**. Up to three explanations run concurrently, with no retries. |
+Only the backend reads the key. The endpoint is pinned to `https://api.openai.com/v1`; redirects and arbitrary remote endpoints are disallowed. The request uses `store: false`. Send only the preselected activity, target grade, skill gaps and aggregate participation counts; no names, employee IDs, full profiles or raw history. The project owner has explicitly authorized sending these synthetic recommendation facts to OpenAI. Offline mode sends nothing.
 
-For Docker Desktop, `host.docker.internal` reaches a server on the host. For a Python backend on the host, use `http://127.0.0.1:11434/v1` instead. Adjust the port to your server. Remote endpoints fall back to templates; the model server must also operate locally.
+For a local tool-capable OpenAI-compatible server:
 
-Reapply Compose environment changes with `docker compose up --build` (a restart alone does not reload them). For a local backend, stop its previous process and run from the repository root:
+```dotenv
+LLM_PROVIDER=local
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_API_KEY=local
+LLM_MODEL=your-loaded-model
+```
+
+Only loopback and `host.docker.internal` are accepted for the local provider. OpenAI keys are not reused for local servers. `LLM_PROVIDER=template` explicitly disables all model calls. Missing keys, network/provider errors, invalid output and timeouts fall back to the same grounded template. Up to three explanations run concurrently with a total model deadline of at most eight seconds and no automatic retries.
+
+Apply environment changes with `docker compose up -d`. Verify actual model use using fabricated facts, without reading the employee dataset:
 
 ```bash
-DATA_DIR=./data DATABASE_URL=sqlite:///./storage/career_quest.sqlite3 \
-  .venv/bin/python -m uvicorn backend.main:app --env-file .env --host 127.0.0.1 --port 8000
+docker compose exec backend python -m backend.check_llm
 ```
 
-Existing shell variables override `.env`; clear any previously exported `LLM_*` settings that conflict. Confirm model use:
-
-```bash
-curl --fail -sS 'http://localhost:8000/recommend/E0002?limit=1'
-```
-
-Check **`recommendations[0].explanation.source == "llm"`** and **`fallback_reason == null`**. HTTP 200 alone is insufficient: provider errors, timeouts, missing configuration, and invalid output deliberately return successful template explanations with a diagnostic reason.
-
-The adapter requires a forced `submit_explanation` function call with a strict schema. The model supplies fact IDs and `direct`/`supportive` phrasing choices; the local self-check rejects free prose, missing/duplicate facts, extra fields, and invented numeric claims. The prompt contains only the preselected event and relevant factors, excluding employee identity and raw history. Automated LLM tests use a mocked HTTP transport; they do not establish compatibility with a particular live model server.
-
-## Project layout
-
-```text
-.
-├── AGENTS.md / CLAUDE.md       Repository instructions
-├── README.md
-├── docker-compose.yml
-├── .env.example
-├── data/                      Supplied JSON/CSV and schema README (gitignored)
-├── storage/                   Persisted SQLite database (gitignored)
-├── examples/
-│   ├── trap_employees.json
-│   └── trap_activity_history.csv
-├── backend/
-│   ├── main.py                FastAPI routes and application lifecycle
-│   ├── app/main.py            Compatibility import of backend.main:app
-│   ├── loader.py              Dataset parsing, reference validation, seeding
-│   ├── engine.py              Deterministic selection and trajectory
-│   ├── explain.py             Grounded LLM adapter and template fallback
-│   ├── store.py               SQLite snapshots, atomic writes, retry handling
-│   ├── schemas.py / uploads.py Request validation and JSON/multipart parsing
-│   ├── tests/                 Loader, engine, explanation, and API tests
-│   ├── requirements.txt
-│   └── Dockerfile
-└── frontend/
-    ├── src/main.jsx           Employee, HR, upload, and recommendation views
-    ├── src/index.css
-    ├── vite.config.js         Local API proxy
-    ├── tailwind.config.js
-    ├── package.json
-    └── Dockerfile
-```
+The check must return `source: "llm"`, `fallback_reason: null`, validated facts and elapsed time below ten seconds. It exits nonzero on fallback; HTTP 200 alone is not evidence of model success. This explicitly makes up to three paid provider calls. Local equivalent: `.venv/bin/python -m backend.check_llm --env-file .env`.
 
 ## Verification
 
-With the starter kit in `data/` and the local Python dependencies installed as above, run from the repository root:
+Latest pre-push recheck, **2026-09-23**: **116 backend tests passed**, **5 frontend tests passed**, Vite production build passed, and the starter-kit loader reported **0 reference errors** during the documentation check. Screenshots were captured from a separate fresh database with model calls disabled. The detailed [verification record](VERIFICATION.md) separates these rechecks from Docker, offline and live-model measurements.
+
+The supplied dataset must be present for full coverage. Tests use isolated temporary databases. They do not reset or complete activities in the demo database.
 
 ```bash
-source .venv/bin/activate
-python -m pytest backend/tests -q
+.venv/bin/python -m pytest backend/tests -q
+npm --prefix frontend test
+npm --prefix frontend run build
+.venv/bin/python -m backend.loader --data-dir ./data --database-url sqlite:///:memory:
 ```
 
-Expected: **79 passed**. Without the starter kit, dataset-dependent checks are skipped, so install it for the complete verification. Tests use isolated temporary databases and do not change the demo's persisted progress.
-
-After the Compose build, the same suite can run without host Python. The application image does not include the committed upload fixtures, so mount `examples/` read-only in a disposable test container:
+Loader counts must be 200 employees, 40 events, 60 skills, 32 role profiles and 2,743 history records, with zero reference errors. Without host Python, run the same tests in Docker:
 
 ```bash
 docker compose run --rm --no-deps -v "$PWD/examples:/app/examples:ro" \
   backend python -m pytest backend/tests -q
+docker compose run --rm --no-deps frontend npm test
+docker compose run --rm --no-deps frontend npm run build
+docker compose run --rm --no-deps backend python -m backend.loader \
+  --data-dir /app/data --database-url sqlite:///:memory:
 ```
 
-To inspect data loading and run the adversarial check individually:
+Acceptance checks matching the TZ and AGENTS.md §7:
+
+| Requirement | Evidence |
+|---|---|
+| Profile, trajectory, skills, completed history | API tests + Employee browser scenario |
+| 1–3 relevant steps, hard filters and critical weighting | Engine tests over fabricated traps and every starter-kit employee |
+| ≥3 explanation factors; no invented numbers | Strict tool-call and fallback tests |
+| Jury profiles and history upload | JSON/multipart, atomic rollback, duplicate and restart tests |
+| Correct historical and live progress | Post-review, capped/repeat gains, same-day completion, backdated upload and legacy migration tests |
+| HR sees who has no step and activity participation | HR list assertions + browser navigation |
+| Privacy and Employee/HR access | Anonymous, cross-employee, role escalation, expiry, revocation and login-limit tests |
+| UI/profile independent of slow AI | Frontend deferred-request/error tests + separate backend request timing |
+| Recommendation under 10s | Concurrent timeout test + explicit live provider smoke check |
+| Offline, one-command run | Prepared images, forced-template overlay and offline startup script |
+
+See [VERIFICATION.md](VERIFICATION.md) for measured results. Review the [engine tests](backend/tests/test_engine.py), [API and upload tests](backend/tests/test_api.py), [ownership and progress tests](backend/tests/test_access_and_progress.py), [demo authentication tests](backend/tests/test_auth_demo.py), [explanation tests](backend/tests/test_explain.py), [loader tests](backend/tests/test_loader.py) and [frontend loading tests](frontend/tests/loadEmployee.test.js). Browser timing and live model latency depend on the machine/provider; measured results are evidence, not a promise about every environment.
+
+## Local development without Docker
+
+Python 3.11+ and Node 22 are supported. Install dependencies while online or from cache:
 
 ```bash
-python -m backend.loader --data-dir ./data --database-url sqlite:///:memory:
-python -m pytest backend/tests/test_engine.py -k adversarial_trap -q
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.txt
+npm --prefix frontend ci
 ```
 
-The loader should report `employees=200`, `events=40`, `skills=60`, `role_profiles=32`, `activity_history=2743`, and `reference_errors=0`. Frontend build check, from the repository root after installing npm dependencies:
+Run these in separate terminals from the repo root:
 
 ```bash
-npm --prefix frontend run build
+APP_ENV=local AUTH_DEMO_MODE=true \
+  DATA_DIR=./data DATABASE_URL=sqlite:///./storage/career_quest.sqlite3 \
+  .venv/bin/python -m uvicorn backend.main:app --env-file .env --host 127.0.0.1 --port 8000
 ```
 
-The suite covers all hard filters, capped gains, critical weighting, by-type engagement, deterministic ordering, gateway projections, the trap profile, explanation grounding/fallback, upload validation and rollback, completion retries and persistence, employee-history scoping, and HR aggregate privacy. Real-dataset endpoint tests assert responses within **2 seconds** without an LLM. Model timeout/concurrency tests support the **10-second** recommendation budget through the 8-second model ceiling; they are not an end-to-end browser latency benchmark.
+```bash
+VITE_API_URL=/api VITE_API_PROXY_TARGET=http://127.0.0.1:8000 \
+  npm --prefix frontend run dev -- --host 127.0.0.1
+```
 
-## Constraints and demo boundaries
+Omit `--env-file .env` if no file exists. The explicit environment variables enable the same one-click jury access as Docker. For private mode, change `AUTH_DEMO_MODE` to `false` and use `.venv/bin/python -m backend.auth credentials hr` to obtain the local login code. Data, storage, `.env`, private keys and offline image bundles are gitignored. The app is designed for a local synthetic-data defense; a deployment beyond loopback requires demo access disabled, HTTPS, an organizational identity system and an operational access-code distribution/revocation policy.
 
-- **Voluntary development:** mandatory activities are excluded from recommendations. History affects relevance; the app does not assign activities, force attendance, or award points for mandatory processes.
-- **Explainability:** every recommendation exposes multiple factors and numbers. The LLM cannot change selection or supply new numbers. The template fallback supports the full no-key scenario.
-- **Privacy and separation:** Employee and HR views are separate; the HR endpoint returns aggregates with no employee IDs, names, raw history, or individual engagement factors. The employee-history endpoint scopes results to its requested profile, and LLM prompts omit personal identifiers and raw history.
-- **Access-control limit:** this is a local synthetic-data demo. Its profile selector can open any employee, and API routes have no authentication or role-based authorization. UI separation and aggregate HR responses do not enforce the TZ's production employee/HR permission boundary.
-- **No public employee rankings**, reward economy, vector database, RAG, embeddings, or required cloud service. SQLite and no-key explanations work offline after dependencies are prepared.
+## Troubleshooting
+
+Start with `docker compose ps` and `docker compose logs --tail=100 backend frontend`. Keep local credentials out of shared logs.
+
+| Symptom | What to check or do |
+|---|---|
+| Cannot connect to the Docker daemon | Start Docker Desktop or your Docker Engine service; retry `docker info`. |
+| Compose rejects `env_file` / `required` | Use Compose 2.24+ and the `docker compose` command. |
+| Backend fails while loading data | Check the four exact filenames directly under `data/`. Read the validation errors; use the supplied schema in `data/README.md`. |
+| Port 5173 or 8000 is already allocated | Stop the conflicting local application, or stop the previous Career Quest run, then start again. |
+| First build fails without internet | Build and export on a connected machine of the same CPU architecture, then use [offline startup](#prepare-for-an-offline-defense). |
+| Offline script cannot find images | Keep `offline/career-quest-images.tar` with the repository, or load the prepared image bundle first. |
+| Page opens but data does not load | Check `/health`, backend logs and the backend container health. In local development, point `VITE_API_PROXY_TARGET` at `http://127.0.0.1:8000`. |
+| Demo buttons are absent | Check `APP_ENV=local` and `AUTH_DEMO_MODE=true`; `.env` overrides `.env.example`. Recreate the backend after an intentional change. Private mode uses account codes instead. |
+| A request returns 401 or the session expires | Sign in again. Session lifetime is eight hours; logout revokes the current token. |
+| Upload/overview returns 403 | Use an HR session. Employee sessions are restricted to their own profile. |
+| Upload returns 409 | An employee or history ID already exists. Do not re-upload the same fixture; use distinct IDs for a new batch. |
+| Upload returns 422 or 413 | Correct the schema/references or reduce the batch below 2 MiB, 1,000 employees and 10,000 history rows. Invalid batches do not partially import. |
+| Recommendations are empty | This can be correct: the target is met or no eligible activity closes a gap. HR shows the reason. |
+| Explanation source is `template` | Expected with no key, forced offline mode or provider/validation failure. Inspect `fallback_reason`; the recommendation remains valid. |
+| Demo numbers differ from this README | The examples assume a fresh starter kit. Existing completions and uploads persist across restarts. |
+| Frontend dependencies appear stale | Rebuild with `docker compose up --build -d --wait`. Dependencies belong to the image, not host `node_modules`. |
+
+## Scope and data handling
+
+This is a working local hackathon solution, evaluated against [AGENTS.md](AGENTS.md). Screenshots use synthetic starter-kit data. Supplied raw data, private environment values, authentication keys, image bundles and local progress are excluded from version control.
+
+Career progress is **coverage of target skill requirements**, not an automatic grade change or a promotion probability. The app supports development planning; completion does not award a new job grade. Public rankings, rewards, calendar integrations and full interface localization are outside the current scope. The `preferred_language` dataset field is retained; the current interface is English.
+
+The official jury's extra profiles and final scoring are not available here. The reproducible checks above document the implemented requirements without claiming a guaranteed score.

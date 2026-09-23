@@ -73,7 +73,7 @@ def adversarial_dataset():
 
 class EngineTests(unittest.TestCase):
     def test_large_uploaded_history_does_not_overflow_self_bonus(self):
-        data = dataset([event("EV_036"), event("NEXT")], [record(f"DONE_{i}", "EV_036") for i in range(6000)])
+        data = dataset([event("EV_036", develops_skills=[]), event("NEXT")], [record(f"DONE_{i}", "EV_036") for i in range(6000)])
         row = RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]
         assert row["factors"]["engagement_by_type"]["course"]["self_factor"] == 1.3
 
@@ -120,7 +120,7 @@ class EngineTests(unittest.TestCase):
             ({"target_roles": ["Data Analyst"]}, [], "wrong_role"),
             ({"target_grades": ["Senior"]}, [], "wrong_grade"),
             ({"mandatory": True}, [], "mandatory"),
-            ({}, [record("DONE", "BLOCKED")], "already_completed"),
+            ({}, [record("DONE", "BLOCKED", date="2026-08-20")], "already_completed"),
         ]
         for overrides, history, reason in cases:
             with self.subTest(reason=reason, overrides=overrides):
@@ -230,17 +230,37 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result["score"], 3 + 2)
         self.assertEqual([g["critical"] for g in result["factors"]["gaps_used"]], [True, False])
 
-    def test_assessed_skills_are_not_replayed_from_post_review_completions(self):
+    def test_post_review_gains_unlock_prerequisites_without_mutating_assessment(self):
         data = dataset(
-            [event("CANDIDATE", prerequisites={SYSTEM: 3}), event("DONE", gain=3)],
+            [event("CANDIDATE", prerequisites={SYSTEM: 3}), event("DONE", gain=1)],
             [record("AFTER_REVIEW", "DONE")],
         )
         engine = RecommendationEngine(data)
-        self.assertEqual(engine.recommend("TEST_EMPLOYEE"), [])
-        data.events[0]["prerequisites"] = {}
-        factors = RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]["factors"]
-        self.assertEqual(factors["gaps_used"][0]["current"], 2)
-        self.assertEqual(factors["skill_basis"], "assessed_employee_skills")
+        self.assertEqual(engine.recommend("TEST_EMPLOYEE")[0]["event_id"], "CANDIDATE")
+        self.assertEqual(engine.employees["TEST_EMPLOYEE"]["skills"][SYSTEM], 3)
+        self.assertEqual(data.employees[0]["skills"][SYSTEM], 2)
+        factors = engine.recommend("TEST_EMPLOYEE")[0]["factors"]
+        self.assertEqual(factors["gaps_used"][0]["current"], 3)
+        self.assertEqual(factors["skill_basis"], "assessment_plus_completed_history")
+        self.assertEqual(RecommendationEngine(data).trajectory("TEST_EMPLOYEE"), engine.trajectory("TEST_EMPLOYEE"))
+
+    def test_history_growth_respects_dates_status_ceiling_and_repeat_order(self):
+        data = dataset([event("EV_036", gain=2, develops_skills=[
+            {"skill_id": SYSTEM, "gain": 2, "max_level": 3},
+            {"skill_id": SPEAKING, "gain": 2, "max_level": 5},
+        ])], [
+            record("BEFORE", "EV_036", date="2026-08-01"),
+            record("REVIEW_DAY", "EV_036", date="2026-09-01"),
+            record("DROP", "EV_036", status="dropped"),
+            record("FIRST", "EV_036", date="2026-09-02"),
+            record("SECOND", "EV_036", date="2026-09-03"),
+            record("FUTURE", "EV_036", date="2026-10-02"),
+        ])
+        engine = RecommendationEngine(data)
+        self.assertEqual(engine.employees["TEST_EMPLOYEE"]["skills"][SYSTEM], 3)
+        self.assertEqual(engine.employees["TEST_EMPLOYEE"]["skills"][SPEAKING], 4)
+        data.activity_history.reverse()
+        self.assertEqual(RecommendationEngine(data).trajectory("TEST_EMPLOYEE"), engine.trajectory("TEST_EMPLOYEE"))
 
     def test_type_engagement_caps_self_factor_then_clamps_product(self):
         for skips, completions in ((0, 0), (1, 0), (3, 0), (4, 0), (0, 1), (0, 2), (1, 3), (4, 2)):
@@ -310,7 +330,7 @@ class EngineTests(unittest.TestCase):
         data = dataset([
             event("START", develops_skills=[{"skill_id": SYSTEM, "gain": 1, "max_level": 3}]),
             event("ADVANCED", prerequisites={SYSTEM: 3}),
-        ], [record("DONE", "ADVANCED")])
+        ], [record("DONE", "ADVANCED", date="2026-08-20")])
         self.assertEqual(RecommendationEngine(data).recommend("TEST_EMPLOYEE")[0]["factors"]["gateway_to"], [])
 
     def test_gateway_never_claims_unlock_while_another_prerequisite_is_unmet(self):

@@ -1,4 +1,4 @@
-"""Grounded explanations with an optional local LLM and offline fallback."""
+"""Grounded explanations with optional OpenAI/local LLM and offline fallback."""
 
 import argparse
 import asyncio
@@ -26,6 +26,7 @@ class LLMSettings:
     base_url: str = ""
     api_key: str = field(default="", repr=False)
     timeout_seconds: float = MAX_LLM_TIMEOUT_SECONDS
+    provider: str = "local"
 
     @classmethod
     def from_env(cls):
@@ -33,11 +34,17 @@ class LLMSettings:
             timeout = float(os.environ.get("LLM_TIMEOUT_SECONDS", MAX_LLM_TIMEOUT_SECONDS))
         except ValueError:
             timeout = MAX_LLM_TIMEOUT_SECONDS
+        provider = os.environ.get("LLM_PROVIDER", "openai" if os.environ.get("OPENAI_API_KEY") else "local")
+        if provider == "template":
+            return cls()
+        if provider not in {"openai", "local"}:
+            raise ValueError("LLM_PROVIDER must be openai, local, or template")
         return cls(
             model=os.environ.get("LLM_MODEL", "gpt-4o-mini"),
-            base_url=os.environ.get("LLM_BASE_URL", "").strip(),
-            api_key=os.environ.get("LLM_API_KEY", ""),
+            base_url="https://api.openai.com/v1" if provider == "openai" else os.environ.get("LLM_BASE_URL", "").strip(),
+            api_key=os.environ.get("OPENAI_API_KEY", "") if provider == "openai" else os.environ.get("LLM_API_KEY", ""),
             timeout_seconds=max(0.01, min(timeout, MAX_LLM_TIMEOUT_SECONDS)),
+            provider=provider,
         )
 
 
@@ -151,7 +158,7 @@ def _request_body(factors: dict, model: str) -> dict:
         }}],
         "tool_choice": {"type": "function", "function": {"name": "submit_explanation"}},
         "parallel_tool_calls": False,
-        "max_tokens": 768,
+        "max_completion_tokens": 768,
     }
 
 
@@ -226,9 +233,13 @@ async def explain(recommendation: dict, settings: LLMSettings | None = None, *, 
     if not settings.base_url or not settings.model:
         return fallback("missing_configuration")
     try:
-        if not _local_endpoint(settings.base_url):
+        allowed = (settings.base_url == "https://api.openai.com/v1" if settings.provider == "openai"
+                   else settings.provider == "local" and _local_endpoint(settings.base_url))
+        if not allowed:
             return fallback("nonlocal_endpoint")
         body = _request_body(factors, settings.model)
+        if settings.provider == "openai":
+            body["store"] = False
         response = await asyncio.wait_for(
             _call_model(settings, body, transport),
             timeout=max(0.01, min(settings.timeout_seconds, MAX_LLM_TIMEOUT_SECONDS)),

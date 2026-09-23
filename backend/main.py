@@ -5,13 +5,14 @@ import sqlite3
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from backend.engine import RecommendationEngine
+from backend.auth import Auth, DemoLogin, Login, allow_employee, bearer, current_user, hr_user
 from backend.explain import LLMSettings, explain_recommendations, slim_factors
 from backend.loader import DatasetValidationError, load_dataset
 from backend.schemas import Completion, UploadBatch
@@ -27,6 +28,7 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
     async def lifespan(app):
         result = await run_in_threadpool(load_dataset, data_dir, database_url)
         app.state.store = Store(result["database"])
+        app.state.auth = Auth(app.state.store)
         app.state.llm_settings = llm_settings if llm_settings is not None else LLMSettings.from_env()
         yield
 
@@ -34,8 +36,35 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[value.strip() for value in os.environ.get("CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",") if value.strip()],
-        allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Content-Type"],
+        allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"],
     )
+
+    @app.middleware("http")
+    async def private_responses(request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post("/auth/login")
+    def login(body: Login):
+        return app.state.auth.login(body)
+
+    @app.get("/auth/demo")
+    def demo_status():
+        return app.state.auth.demo_status()
+
+    @app.post("/auth/demo/login")
+    def demo_login(body: DemoLogin):
+        return app.state.auth.demo_login(body)
+
+    @app.get("/auth/me")
+    def me(user=Depends(current_user)):
+        return user
+
+    @app.post("/auth/logout")
+    def logout(user=Depends(current_user), credentials=Depends(bearer)):
+        app.state.auth.logout(credentials.credentials)
+        return {"status": "signed_out"}
 
     @app.exception_handler(DatasetValidationError)
     async def invalid_dataset(request, exc):
@@ -62,14 +91,16 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
         return {"status": "ok"}
 
     @app.get("/employees")
-    def employees() -> list[dict]:
+    def employees(user=Depends(current_user)) -> list[dict]:
         return [{
             "id": row["employee_id"], "name": row["full_name"], "role": row["role"],
             "grade": row["grade"], "department": row["department"],
-        } for row in sorted(app.state.store.read().employees, key=lambda row: row["employee_id"])]
+        } for row in sorted(app.state.store.read().employees, key=lambda row: row["employee_id"])
+            if user["role"] == "hr" or row["employee_id"] == user["employee_id"]]
 
     @app.get("/employees/{employee_id}")
-    def employee(employee_id: str) -> dict:
+    def employee(employee_id: str, user=Depends(current_user)) -> dict:
+        allow_employee(user, employee_id)
         dataset = app.state.store.read()
         engine = RecommendationEngine(dataset)
         if employee_id not in engine.employees:
@@ -77,15 +108,19 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
         history = [{
             **row, "title": engine.events[row["event_id"]]["title"],
             "type": engine.events[row["event_id"]]["type"],
-        } for row in dataset.activity_history if row["employee_id"] == employee_id]
+        } for row in engine.history[employee_id]]
         return {
             "profile": engine.employees[employee_id], "trajectory": engine.trajectory(employee_id),
             "as_of_date": engine.as_of.isoformat(),
+            "assessed_skills": engine.assessed_skills[employee_id],
+            "skill_updates": engine.skill_updates[employee_id],
             "activity_history": sorted(history, key=lambda row: (row["date"], row["record_id"]), reverse=True),
         }
 
     @app.get("/recommend/{employee_id}")
-    async def recommend(employee_id: str, limit: int = Query(3, ge=1, le=3), debug: bool = False) -> dict:
+    async def recommend(employee_id: str, limit: int = Query(3, ge=1, le=3), debug: bool = False,
+                        user=Depends(current_user)) -> dict:
+        allow_employee(user, employee_id)
         engine = await run_in_threadpool(employee_engine, employee_id)
         ranked = await run_in_threadpool(engine.recommend, employee_id, limit)
         explained = await explain_recommendations(ranked, app.state.llm_settings)
@@ -107,7 +142,8 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
         return {"employee_id": employee_id, "as_of_date": engine.as_of.isoformat(), "recommendations": steps}
 
     @app.post("/complete")
-    def complete(body: Completion) -> dict:
+    def complete(body: Completion, user=Depends(current_user)) -> dict:
+        allow_employee(user, body.employee_id)
         return app.state.store.complete(body)
 
     @app.post("/upload", status_code=201, openapi_extra={"requestBody": {
@@ -119,7 +155,7 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
             }}},
         },
     }})
-    async def upload(request: Request) -> dict:
+    async def upload(request: Request, user=Depends(hr_user)) -> dict:
         """Accept {meta?, employees: [...], activity_history: [...]} JSON, or
         multipart employees_file (dataset employees.json) and history_file (CSV).
         Both collections are optional, but the batch must contain at least one row.
@@ -128,12 +164,20 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
         return await run_in_threadpool(app.state.store.upload, batch)
 
     @app.get("/hr/overview")
-    def hr_overview() -> dict:
+    def hr_overview(user=Depends(hr_user)) -> dict:
         engine = RecommendationEngine(app.state.store.read())
         lagging = defaultdict(lambda: {"total_gap": 0, "employees_affected": 0, "critical_employees": 0})
-        without_step = 0
-        for employee_id in engine.employees:
-            without_step += not bool(engine.recommend(employee_id))
+        without_step = []
+        for employee_id, employee in sorted(engine.employees.items()):
+            trajectory = engine.trajectory(employee_id)
+            if not engine.recommend(employee_id):
+                without_step.append({
+                    "employee_id": employee_id, "name": employee["full_name"],
+                    "role": employee["role"], "grade": employee["grade"], "department": employee["department"],
+                    "target_role": trajectory["target_role"], "target_grade": trajectory["target_grade"],
+                    "total_gap": trajectory["total_gap"], "critical_gap": trajectory["critical_gap"],
+                    "reason": "target_met" if trajectory["total_gap"] == 0 else "no_eligible_useful_activity",
+                })
             for skill in engine.trajectory(employee_id)["skills"]:
                 if skill["gap"] > 0:
                     aggregate = lagging[skill["skill_id"]]
@@ -154,7 +198,7 @@ def create_app(*, data_dir=None, database_url=None, llm_settings=None) -> FastAP
             })
         return {
             "as_of_date": engine.as_of.isoformat(), "employee_count": len(engine.employees),
-            "employees_without_recommendation": {"count": without_step},
+            "employees_without_recommendation": {"count": len(without_step), "employees": without_step},
             "most_lagging_skills": sorted([
                 {"skill_id": key, "skill_name": engine.skill_names[key], **value}
                 for key, value in lagging.items()

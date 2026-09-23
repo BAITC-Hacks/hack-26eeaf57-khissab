@@ -42,3 +42,49 @@ Constraints (from AGENTS.md, repeated because they decide the score):
 
 Before you say a stage is done, actually run it and confirm the §7 checklist
 items it covers. Ask me if the spec and AGENTS.md conflict on anything.
+
+## §4 — Concrete engine and progress contract
+
+The original instructions above referenced missing sections. These definitions
+make that contract explicit for this repository and preserve the fixed stack.
+
+- Target `career_goal`, otherwise the next grade (Lead remains Lead).
+- Reconstruct effective skills from the assessment plus completed history after
+  `last_review_date` and on/before the dataset snapshot. Application completions
+  are tracked explicitly, including same-day completions. Never double-count.
+- Gap = max(0, required - effective current). Effective event gain is capped by
+  gain, max_level and remaining gap. Weight critical skills 3, others 1.
+- Require current role/grade audience and prerequisites. Exclude mandatory and
+  completed events except EV_036. Filters use effective skills.
+- By activity type: decline/no_show/dropped factor = 0.6^count; self-completion
+  factor = min(1.15^count, 1.3); engagement = clamp(product, 0.2, 1.3).
+- Score = benefit × engagement. Return 0–3 positive eligible steps. Ties:
+  availability, duration, feedback, event ID. Gateways add evidence, not score.
+- Keep assessment and history separately; completion and upload are atomic.
+- Each rationale includes grade/target, skill gaps and engagement evidence.
+  The model never selects events or supplies authoritative numbers.
+
+## §7 — Acceptance checklist
+
+Run and verify before claiming completion:
+
+- Dataset reference validation and expected starter-kit counts.
+- Trap test: low Public Speaking plus three skips loses to a promotion-critical
+  System Design step; removing history or critical weighting exposes the trap.
+- Role/grade/prerequisite/mandatory/completed hard filters and EV_036 exception.
+- Post-assessment learning, max_level, same-day application completions,
+  backdated uploads, idempotency, restart persistence and legacy migration.
+- JSON and multipart jury upload; invalid batches roll back.
+- Profile, skills, trajectory, history, recommendation numbers and completion UI.
+- HR-only list of employees without a step, skill gaps and participation.
+- API authentication, employee ownership checks and HR-only upload/overview.
+- Profile/UI does not wait for AI; normal profile target ≤2s, AI ≤10s.
+- Model tool-call self-check and no-key/error/timeout template fallback.
+- Frontend tests/build, backend tests, Docker and prepared offline startup.
+- README includes architecture, stack, single-command run, authentication,
+  trap upload, optional model configuration and reproducible verification.
+
+The owner explicitly requested OpenAI integration after the audit and approved
+sending de-identified synthetic recommendation factors to OpenAI. It is optional;
+no-key and forced-template offline operation must continue working. Never commit
+API keys, authentication keys, the provided dataset or local progress.

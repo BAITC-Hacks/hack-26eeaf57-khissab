@@ -6,7 +6,7 @@ import json
 import os
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -35,6 +35,8 @@ class Dataset:
     employees: list[dict]
     events: list[dict]
     activity_history: list[dict]
+    # Application completions happened after the assessment, including same-day ones.
+    completion_record_ids: list[str] = field(default_factory=list)
 
 
 def _unique_object(pairs: list[tuple]) -> dict:

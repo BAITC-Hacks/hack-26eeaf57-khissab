@@ -58,7 +58,15 @@ def api(tmp_path):
                 "llm_settings": LLMSettings()}
     app = create_app(**settings)
     with TestClient(app) as client:
+        sign_in(client)
         yield client, app, settings
+
+
+def sign_in(client, username="hr"):
+    response = client.post("/auth/login", json=client.app.state.auth.credentials(username))
+    assert response.status_code == 200, response.text
+    client.headers["Authorization"] = f"Bearer {response.json()['access_token']}"
+    return response.json()
 
 
 def new_profile(employee_id="DEMO_NEW"):
@@ -133,13 +141,14 @@ def test_recommendation_slim_default_debug_full_and_trap(api):
 ], ids=["no-llm-settings", "key-omitted", "key-empty"])
 def test_startup_without_llm_key_uses_template(api, monkeypatch, environment):
     _, _, settings = api
-    for name in ("LLM_MODEL", "LLM_BASE_URL", "LLM_API_KEY", "LLM_TIMEOUT_SECONDS"):
+    for name in ("LLM_MODEL", "LLM_BASE_URL", "LLM_API_KEY", "LLM_TIMEOUT_SECONDS", "OPENAI_API_KEY", "LLM_PROVIDER"):
         monkeypatch.delenv(name, raising=False)
     for name, value in environment.items():
         monkeypatch.setenv(name, value)
     app = create_app(**{**settings, "llm_settings": None})
     with patch("backend.explain._call_model", side_effect=AssertionError("No-key path must stay offline")) as model:
         with TestClient(app) as client:
+            sign_in(client)
             assert client.get("/health").json() == {"status": "ok"}
             response = client.get("/recommend/TEST_EMPLOYEE")
             assert response.status_code == 200, response.text
@@ -191,6 +200,7 @@ def test_upload_json_then_immediate_recommendation_and_restart(api):
     assert workshop["factors"]["engagement"]["multiplier"] == 0.6
     assert any(row["id"] == "DEMO_NEW" for row in client.get("/employees").json())
     with TestClient(create_app(**settings)) as restarted:
+        sign_in(restarted)
         assert restarted.get("/recommend/DEMO_NEW").json() == result
     assert len(app.state.store.read().employees) == 2
 
@@ -209,7 +219,8 @@ def test_upload_multipart_same_batch_manager_history_and_assessed_skills(api):
     assert response.status_code == 201, response.text
     assert response.json()["inserted"] == {"employees": 2, "activity_history": 1}
     detail = client.get("/employees/DEMO_NEW").json()
-    assert detail["profile"]["skills"] == employee["skills"]  # Uploaded history never replays gains.
+    assert detail["assessed_skills"] == employee["skills"]
+    assert detail["profile"]["skills"][SYSTEM] == employee["skills"][SYSTEM] + 1
     assert "CRITICAL" not in {r["event_id"] for r in client.get("/recommend/DEMO_NEW").json()["recommendations"]}
 
 
@@ -293,6 +304,7 @@ def test_complete_updates_trajectory_is_idempotent_and_survives_restart(api):
     assert len(completions) == 1
     assert completions[0]["date"] == "2026-10-01"
     with TestClient(create_app(**settings)) as restarted:
+        sign_in(restarted)
         assert complete(restarted).json() == updated
         detail = restarted.get("/employees/TEST_EMPLOYEE").json()
         assert detail["profile"]["skills"] == updated["skills"]
@@ -409,7 +421,7 @@ def test_slow_model_times_out_concurrently_without_blocking_profiles(api):
     assert all(row["explanation"]["fallback_reason"] == "timeout" for row in result.json()["recommendations"])
 
 
-def test_hr_is_aggregate_only_and_includes_new_no_step_profile(api):
+def test_hr_includes_identifiable_no_step_profiles_without_raw_history(api):
     client, _, _ = api
     profile = new_profile("NO_STEP")
     profile["skills"] = {key: 5 for key in profile["skills"]}
@@ -417,7 +429,10 @@ def test_hr_is_aggregate_only_and_includes_new_no_step_profile(api):
     assert client.get("/recommend/NO_STEP").json()["recommendations"] == []
     before = client.get("/hr/overview").json()
     assert before["employee_count"] == 2
-    assert before["employees_without_recommendation"] == {"count": 1}
+    assert before["employees_without_recommendation"]["count"] == 1
+    person = before["employees_without_recommendation"]["employees"][0]
+    assert person["employee_id"] == "NO_STEP"
+    assert person["reason"] == "target_met"
     assert before["most_lagging_skills"][0]["total_gap"] == 5
     complete(client)
     after = client.get("/hr/overview").json()
@@ -426,7 +441,7 @@ def test_hr_is_aggregate_only_and_includes_new_no_step_profile(api):
     activity = next(a for a in after["participation_by_activity"] if a["event_id"] == "CRITICAL")
     assert activity["status_counts"] == {"completed": 1}
     assert activity["participants"] == 1
-    for forbidden in ("employee_id", "TEST_EMPLOYEE", "NO_STEP", "full_name", "engagement", "assigned_by", "record_id"):
+    for forbidden in ("engagement", "assigned_by", "record_id", "activity_history"):
         assert forbidden not in json.dumps(after)
 
 
@@ -434,6 +449,7 @@ def test_hr_is_aggregate_only_and_includes_new_no_step_profile(api):
 def test_real_dataset_e0002_gateway_completion_and_endpoint_budgets(tmp_path):
     app = create_app(data_dir=ROOT / "data", database_url=f"sqlite:///{tmp_path / 'api.sqlite3'}", llm_settings=LLMSettings())
     with TestClient(app) as client:
+        sign_in(client)
         for path in ("/employees", "/employees/E0002", "/recommend/E0002", "/hr/overview"):
             start = perf_counter()
             response = client.get(path)

@@ -22,6 +22,25 @@ class Store:
         if path == ":memory:":
             raise ValueError("The API requires a persistent SQLite file inside storage/")
         self.path = path
+        self._migrate_assessments()
+
+    def _migrate_assessments(self):
+        """Undo the old materialized API gains once; history becomes the source of truth.
+
+        Old completion responses retain each previous level, so reversing them
+        restores the assessment even for capped and recurring activities.
+        """
+        with self.transaction(write=True) as connection:
+            if connection.execute("SELECT 1 FROM metadata WHERE key = 'skill_storage_version'").fetchone():
+                return
+            for row in connection.execute("SELECT * FROM completion_requests ORDER BY rowid DESC").fetchall():
+                result = json.loads(row["response"])
+                employee_row = connection.execute("SELECT payload FROM employees WHERE employee_id = ?", (row["employee_id"],)).fetchone()
+                employee = json.loads(employee_row["payload"])
+                for change in result["skill_changes"]:
+                    employee["skills"][change["skill_id"]] = change["before"]
+                connection.execute("UPDATE employees SET payload = ? WHERE employee_id = ?", (json.dumps(employee), row["employee_id"]))
+            connection.execute("INSERT INTO metadata (key, value) VALUES ('skill_storage_version', '2')")
 
     @contextmanager
     def transaction(self, *, write=False):
@@ -45,6 +64,9 @@ class Store:
         return Dataset(
             meta=metadata["dataset_meta"], proficiency_scale=metadata["proficiency_scale"],
             activity_history=[dict(row) for row in connection.execute("SELECT * FROM activity_history")],
+            completion_record_ids=[json.loads(row["response"])["record_id"] for row in connection.execute(
+                "SELECT response FROM completion_requests ORDER BY rowid"
+            )],
             **collections,
         )
 
@@ -100,7 +122,8 @@ class Store:
                 if (saved["employee_id"], saved["event_id"]) != (request.employee_id, request.event_id):
                     raise StoreError(409, "request_id already used for a different completion")
                 return json.loads(saved["response"])
-            engine = RecommendationEngine(self._read(connection))
+            dataset = self._read(connection)
+            engine = RecommendationEngine(dataset)
             if request.employee_id not in engine.employees:
                 raise StoreError(404, "Employee not found")
             if request.event_id not in engine.events:
@@ -114,7 +137,6 @@ class Store:
                 skill_id = gain["skill_id"]
                 before = employee["skills"].get(skill_id, 0)
                 after = before + max(0, min(gain["gain"], gain["max_level"] - before))
-                employee["skills"][skill_id] = after
                 changes.append({"skill_id": skill_id, "before": before, "after": after, "gain": after - before})
             record = {
                 "record_id": f"API_{uuid4().hex}", "employee_id": request.employee_id,
@@ -122,16 +144,15 @@ class Store:
                 "status": "completed", "completion_pct": 100, "score": None,
                 "feedback_rating": None, "assigned_by": "self",
             }
-            connection.execute(
-                "UPDATE employees SET payload = ? WHERE employee_id = ?",
-                (json.dumps(employee), request.employee_id),
-            )
             self._insert_history(connection, [record])
+            dataset.activity_history.append(record)
+            dataset.completion_record_ids.append(record["record_id"])
+            updated = RecommendationEngine(dataset)
             response = {
                 "employee_id": request.employee_id, "event_id": request.event_id,
                 "request_id": request.request_id, "record_id": record["record_id"],
-                "skills": employee["skills"], "skill_changes": changes,
-                "trajectory": engine.trajectory(request.employee_id),
+                "skills": updated.employees[request.employee_id]["skills"], "skill_changes": changes,
+                "trajectory": updated.trajectory(request.employee_id),
             }
             connection.execute(
                 "INSERT INTO completion_requests (request_id, employee_id, event_id, response) VALUES (?, ?, ?, ?)",

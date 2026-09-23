@@ -1,5 +1,6 @@
 services:
   backend:
+    image: career-quest-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -12,21 +13,35 @@ services:
       - ./data:/app/data:ro
       - ./storage:/app/storage
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 12
 
   frontend:
+    image: career-quest-frontend:local
     build:
       context: .
       dockerfile: frontend/Dockerfile
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       VITE_API_URL: ${VITE_API_URL:-/api}
       VITE_API_PROXY_TARGET: ${VITE_API_PROXY_TARGET:-http://backend:8000}
     volumes:
-      - ./frontend:/app/frontend
-      - /app/frontend/node_modules
+      - ./frontend/src:/app/frontend/src:ro
+      - ./frontend/public:/app/frontend/public:ro
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     command: npm run dev -- --host 0.0.0.0
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 12

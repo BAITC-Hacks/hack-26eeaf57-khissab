@@ -1,0 +1,6 @@
+services:
+  backend:
+    environment:
+      LLM_PROVIDER: template
+      OPENAI_API_KEY: ""
+      LLM_API_KEY: ""

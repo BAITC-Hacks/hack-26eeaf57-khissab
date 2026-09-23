@@ -160,7 +160,7 @@ class ExplainTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_configuration_and_nonlocal_endpoint_never_make_requests(self):
         def forbidden(request):
             self.fail("Invalid configuration attempted a request")
-        for url, reason in (("", "missing_configuration"), ("https://api.openai.com/v1", "nonlocal_endpoint")):
+        for url, reason in (("", "missing_configuration"), ("https://untrusted.example/v1", "nonlocal_endpoint")):
             with self.subTest(url=url):
                 settings = LLMSettings(base_url=url, api_key="test")
                 result = await explain(self.recommendation, settings, transport=httpx.MockTransport(forbidden))
@@ -174,6 +174,35 @@ class ExplainTests(unittest.IsolatedAsyncioTestCase):
         result = await explain(recommendation, LLMSettings())
         self.assertIn("prerequisites would remain unmet", result["text"])
         self.assertNotIn("would unlock", result["text"])
+
+    async def test_openai_uses_pinned_https_endpoint_and_strict_nonstored_tool_call(self):
+        def model(request):
+            self.assertEqual(str(request.url), "https://api.openai.com/v1/chat/completions")
+            body = json.loads(request.content)
+            self.assertFalse(body["store"])
+            self.assertTrue(body["tools"][0]["function"]["strict"])
+            self.assertEqual(body["max_completion_tokens"], 768)
+            prompt = json.loads(body["messages"][1]["content"])
+            for forbidden in ("employee_id", "full_name", "record_id", "assigned_by", "manager_id", "hire_date"):
+                self.assertNotIn(forbidden, json.dumps(prompt))
+            return httpx.Response(200, json=tool_response(body))
+        settings = LLMSettings(provider="openai", base_url="https://api.openai.com/v1", api_key="synthetic-test-token")
+        result = await explain(self.recommendation, settings, transport=httpx.MockTransport(model))
+        self.assertEqual(result["source"], "llm")
+        for unsafe in ("http://api.openai.com/v1", "https://api.openai.com.evil.example/v1", "http://localhost:1234/v1"):
+            settings = LLMSettings(provider="openai", base_url=unsafe, api_key="synthetic-test-token")
+            result = await explain(self.recommendation, settings, transport=httpx.MockTransport(lambda r: self.fail("Leaked key")))
+            self.assertEqual(result["source"], "template")
+
+    def test_openai_key_is_not_reused_for_local_provider_and_offline_mode_disables_both(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "openai-test", "LLM_BASE_URL": "http://localhost:1234/v1"}, clear=True):
+            settings = LLMSettings.from_env()
+            self.assertEqual(settings.base_url, "https://api.openai.com/v1")
+            self.assertEqual(settings.provider, "openai")
+            os.environ["LLM_PROVIDER"] = "local"
+            self.assertEqual(LLMSettings.from_env().api_key, "")
+            os.environ.update(LLM_PROVIDER="template", LLM_API_KEY="local-test")
+            self.assertEqual(LLMSettings.from_env().api_key, "")
 
     def test_environment_settings_have_a_capped_timeout(self):
         with patch.dict(os.environ, {"LLM_MODEL": "local-model", "LLM_BASE_URL": "http://localhost:11434/v1",
