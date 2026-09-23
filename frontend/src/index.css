@@ -2,11 +2,126 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  background: #f6f7f9;
-  color: #111827;
+@layer base {
+  :root {
+    color-scheme: light;
+    font-family:
+      Aptos, "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+    background: #fafaf9;
+    color: #0f172a;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(250, 250, 249, 0.96)),
+      repeating-linear-gradient(90deg, rgba(15, 23, 42, 0.035) 0, rgba(15, 23, 42, 0.035) 1px, transparent 1px, transparent 56px);
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+  }
+
+  .panel-title {
+    @apply text-base font-semibold text-slate-950;
+  }
+
+  .nav-button {
+    @apply inline-flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold text-slate-600 transition hover:text-slate-950 sm:flex-none;
+  }
+
+  .nav-button-active {
+    @apply bg-white text-slate-950 shadow-sm;
+  }
+
+  .segmented-button {
+    @apply rounded px-3 py-1.5 text-sm font-semibold text-slate-500 transition hover:text-slate-900;
+  }
+
+  .segmented-button-active {
+    @apply bg-white text-slate-950 shadow-sm;
+  }
+
+  .input {
+    @apply w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-100;
+  }
+
+  .file-drop {
+    @apply flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 transition hover:border-sky-400 hover:bg-sky-50;
+  }
+
+  .primary-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300;
+  }
+
+  .stat-cell {
+    @apply rounded-md border border-slate-200 bg-slate-50 px-3 py-3;
+  }
+
+  .empty-state {
+    @apply flex items-start gap-3 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-5;
+  }
+
+  .data-table {
+    @apply w-full min-w-[680px] border-separate border-spacing-0 text-left text-sm;
+  }
+
+  .data-table th {
+    @apply border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .data-table td {
+    @apply border-b border-slate-100 px-3 py-3 align-middle text-slate-700;
+  }
+
+  .data-table tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .completion-row {
+    @apply flex flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between;
+  }
+
+  .recommendation-card {
+    @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+  }
+
+  .evidence-title {
+    @apply text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .evidence-row {
+    @apply flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3;
+  }
+
+  .metric-panel {
+    @apply rounded-md border border-slate-200 bg-slate-50 p-3;
+  }
+
+  .metric-cell {
+    @apply rounded-md border border-slate-200 bg-white px-3 py-2;
+  }
+
+  .metric-cell-strong {
+    @apply rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2;
+  }
+
+  .hr-row {
+    @apply grid gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 md:grid-cols-[220px_minmax(120px,1fr)_minmax(260px,auto)] md:items-center;
+  }
 }

@@ -8,7 +8,7 @@ Career Quest is an offline-first employee development navigator. It recommends 1
 
 ## Status
 
-P0-P4 are implemented: scaffold, validated loader, deterministic engine, grounded explanations, and the FastAPI endpoints below. SQLite persists uploaded profiles/history and completed-event progress. The frontend is still a placeholder; Employee/HR views and final polish follow in P5-P6. The model adapter has mocked contract tests; live-model wiring is deferred until after the frontend.
+P0-P5 are implemented: scaffold, validated loader, deterministic engine, grounded explanations, FastAPI endpoints, and a React/Vite/Tailwind frontend with separated Employee and HR views. SQLite persists uploaded profiles/history and completed-event progress. The model adapter has mocked contract tests; live-model wiring is optional and local-only.
 
 ## Architecture
 
@@ -35,7 +35,7 @@ SQLite in /storage
 docker compose up
 ```
 
-Docker is the primary run path. Before starting a fresh clone, place the separately supplied starter kit in `data/` as described below. Open the frontend at http://localhost:5173 and backend health check at http://localhost:8000/health.
+Docker is the primary run path. Before starting a fresh clone, place the separately supplied starter kit in `data/` as described below. Open the frontend at http://localhost:5173 and backend health check at http://localhost:8000/health. The frontend uses Vite's `/api` proxy in Compose, so browser requests stay on the frontend origin while the proxy forwards to the backend service.
 
 `docker compose up` works fully without any API key via the deterministic template fallback. `.env.example` is used by Compose by default. `LLM_MODEL` selects the optional explanation model; `LLM_API_KEY` is optional. Recommendation selection remains local. Runtime must work offline; the initial image/dependency build requires packages and base images to be available or cached before disconnecting.
 
@@ -63,10 +63,10 @@ Frontend, terminal 2, also starting from the repository root:
 ```bash
 cd frontend
 npm install
-VITE_API_BASE_URL=http://localhost:8000 npm run dev -- --host 127.0.0.1
+VITE_API_URL=/api npm run dev -- --host 127.0.0.1
 ```
 
-Open http://localhost:5173 and verify the backend with `curl http://127.0.0.1:8000/health` (returns `{"status":"ok"}`). Install dependencies once while online or from a local cache; startup, data loading, and the template fallback require no network service or API key.
+Open http://localhost:5173 and verify the backend with `curl http://127.0.0.1:8000/health` (returns `{"status":"ok"}`). The Vite proxy defaults to `http://127.0.0.1:8000`; set `VITE_API_PROXY_TARGET` only if the backend runs elsewhere. For a static build served without Vite's proxy, set `VITE_API_URL` to the backend URL. Install dependencies once while online or from a local cache; startup, data loading, and the template fallback require no network service or API key.
 
 The local DB URL creates `storage/career_quest.sqlite3` under the repository root, inside gitignored `/storage/`. The loader also defaults to this repo-local path and `data/` when the environment variables are unset. Local commands explicitly override the container-only `/app/...` paths from `.env.example`; Python does not automatically load that file.
 
@@ -111,7 +111,7 @@ python3 -m backend.loader --data-dir ./data --database-url sqlite:///./storage/c
 
 Validation checks unique skill, employee, event, history, and role/grade IDs; all skill references in employee skills, role requirements, critical skills, event gains, and prerequisites; employee role/grade and career-goal references; manager IDs (including Lead/same-department constraints); event target roles/grades; and history employee/event IDs. Invalid reference diagnostics include the offending record and field. Any validation error exits nonzero before database writes. SQLite foreign keys additionally enforce employee/manager, role/grade, and history relations.
 
-P1 covers dataset ingestion and validation as the foundation for the TZ's profile/history and additional test-profile requirements. P2 verifies the recommendation core and trap profile below. P4 verifies upload and completion flows through HTTP; user-facing views remain for P5.
+P1 covers dataset ingestion and validation as the foundation for the TZ's profile/history and additional test-profile requirements. P2 verifies the recommendation core and trap profile below. P4 verifies upload and completion flows through HTTP. P5 adds the user-facing Employee and HR views on top of those endpoints.
 
 ## API Surface
 
@@ -130,6 +130,18 @@ P1 covers dataset ingestion and validation as the foundation for the TZ's profil
 `CORS_ORIGINS` defaults to `http://localhost:5173,http://127.0.0.1:5173`, matching `.env.example`. Set it explicitly if Vite uses another port. CORS permits GET/POST and Content-Type, with no wildcard origin or credentials. OpenAPI is at `/openapi.json`, including both upload formats. The optional `/docs` explorer loads its UI assets from a CDN; the API itself needs no internet.
 
 This is a local hackathon demo API, not an authentication boundary. HR receives aggregates only, but employee/debug routes are unauthenticated. Do not expose the server to untrusted networks or use it for real personnel data before adding authentication and authorization. P5 separates the Employee and HR UI views.
+
+## Frontend Demo (P5)
+
+The React app has two separated views:
+
+- Employee view: profile selector, role/grade/department, target trajectory, current skill levels versus target-grade requirements, recommendation cards, and a completion panel for activities marked complete in the current UI session.
+- Recommendation cards: each card shows the score, event metadata, every skill gap used for scoring (`current -> required`, gap, effective gain, critical flag), engagement counts/factors, rationale text, explanation source, and `gateway_to` unlock evidence.
+- Mark complete: posts `POST /complete`, updates the visible skill levels and trajectory from the response, then re-fetches recommendations and HR aggregates without a browser reload.
+- HR overview: reads only `GET /hr/overview` aggregates: lagging skills, count of employees with no recommended step, and participation by activity. It does not render employee engagement histories.
+- Upload panel: supports multipart `employees_file` + `history_file` and JSON upload batches. After a successful upload, the app refreshes employees, opens the first inserted employee, and shows recommendations immediately.
+
+For the committed trap demo, start the app, upload `examples/trap_employees.json` and `examples/trap_activity_history.csv` from the Upload panel, and confirm that `DEMO_TRAP` opens automatically. The recommendation cards expose the numeric reason critical courses outrank the skipped workshop path.
 
 ### Complete a Step
 
